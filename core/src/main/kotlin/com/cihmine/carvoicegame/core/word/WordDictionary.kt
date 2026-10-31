@@ -39,7 +39,11 @@ class WordDictionary(entries: Iterable<WordEntry>) {
                 .toList(),
         )
 
-        fun loadSample(): WordDictionary = parseTsv(readResource("/data/sample_words.tsv"))
+        /** 앱에 넣는 단어 파일들. 모두 자체 작성한 일반 명사와 뜻풀이다. */
+        val BUNDLED_FILES = listOf("/data/sample_words.tsv", "/data/words_more_1.tsv", "/data/words_more_2.tsv")
+
+        fun loadSample(): WordDictionary =
+            WordDictionary(BUNDLED_FILES.flatMap { parseTsv(readResource(it)).entries })
     }
 }
 
