@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "items": [
+    { "id": "animal-tiger", "name": "호랑이", "category": "동물", "difficulty": "EASY", "aliases": ["범"],
+      "facts": ["고양잇과의 육식동물이다", "몸에 검은 줄무늬가 있다", "한국 전래동화에 자주 나온다"] },
+    { "id": "animal-giraffe", "name": "기린", "category": "동물", "difficulty": "EASY",
+      "facts": ["목이 매우 긴 초식동물이다", "아프리카 초원에 산다", "키가 가장 큰 육상동물이다"] },
+    { "id": "food-kimchi", "name": "김치", "category": "음식", "difficulty": "EASY",
+      "facts": ["배추나 무를 소금에 절여 양념한 발효 음식이다", "한국의 대표 반찬이다"] },
+    { "id": "sport-soccer", "name": "축구", "category": "스포츠 종목", "difficulty": "EASY",
+      "facts": ["공을 발로 차서 상대 골문에 넣는 경기다", "한 팀이 11명이다"] },
+    { "id": "animal-panda", "name": "판다", "category": "동물", "difficulty": "HARD", "aliases": ["자이언트 판다"],
+      "facts": ["대나무를 주로 먹는 곰과 동물이다", "털이 흑백이다", "중국이 원산지다"] },
+    { "id": "sport-curling", "name": "컬링", "category": "스포츠 종목", "difficulty": "HARD",
+      "facts": ["얼음 위에서 돌을 미끄러뜨려 표적에 가깝게 놓는 경기다", "브룸으로 얼음을 닦는다", "동계 올림픽 종목이다"] },
+    { "id": "person-sejong", "name": "세종대왕", "category": "인물", "difficulty": "EASY", "aliases": ["세종"],
+      "facts": ["조선의 제4대 왕이다", "훈민정음을 창제했다", "만 원권 지폐 인물이다"] },
+    { "id": "person-yisunsin", "name": "이순신", "category": "인물", "difficulty": "EASY", "aliases": ["이순신 장군", "충무공"],
+      "facts": ["조선 중기의 무신이다", "임진왜란 때 수군을 이끌었다", "거북선으로 유명하다"] },
+    { "id": "person-yugwansun", "name": "유관순", "category": "인물", "difficulty": "EASY",
+      "facts": ["일제강점기 독립운동가다", "3·1 운동에 참여했다"] },
+    { "id": "person-jeongyakyong", "name": "정약용", "category": "인물", "difficulty": "HARD", "aliases": ["다산"],
+      "facts": ["조선 후기 실학자다", "수원 화성을 쌓을 때 거중기를 고안했다", "목민심서를 지었다"] },
+    { "id": "person-jangyeongsil", "name": "장영실", "category": "인물", "difficulty": "HARD",
+      "facts": ["조선 세종 때 과학 기술자다", "자격루 제작에 참여했다"] },
+    { "id": "person-sinsaimdang", "name": "신사임당", "category": "인물", "difficulty": "HARD",
+      "facts": ["조선 시대 화가이자 문인이다", "율곡 이이의 어머니다", "오만 원권 지폐 인물이다"] }
+  ]
+}
