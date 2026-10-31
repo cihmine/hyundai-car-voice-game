@@ -6,6 +6,9 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class VoiceCommand {
     QUIT, PAUSE, RESUME, EASIER, HARDER, FASTER, SLOWER, RULES, HINT, GIVE_UP, YES, NO,
+
+    /** "잘못 들었어" — 직전 인식·판정 취소 */
+    MISHEARD, EXPLAIN_WORD,
 }
 
 sealed interface ParsedUtterance {
@@ -44,8 +47,8 @@ class CommandParser(private val personal: Map<String, VoiceCommand> = emptyMap()
 
         private val BUILT_IN: Map<String, VoiceCommand> = buildMap {
             fun add(command: VoiceCommand, vararg phrases: String) = phrases.forEach { put(Words.normalize(it), command) }
-            add(VoiceCommand.QUIT, "그만", "그만해", "그만할래", "게임 종료", "종료", "끝내자")
-            add(VoiceCommand.PAUSE, "잠깐 멈춰", "멈춰", "일시정지", "잠깐만")
+            add(VoiceCommand.QUIT, "그만", "그만해", "그만하자", "그만할래", "게임 종료", "종료", "끝내자")
+            add(VoiceCommand.PAUSE, "잠깐 멈춰", "멈춰", "일시정지", "잠깐만", "잠깐")
             add(VoiceCommand.RESUME, "이어서 하자", "이어서", "계속하자", "계속해")
             add(VoiceCommand.EASIER, "쉽게 해 줘", "쉽게", "더 쉽게")
             add(VoiceCommand.HARDER, "어렵게 해 줘", "어렵게", "더 어렵게")
@@ -56,6 +59,8 @@ class CommandParser(private val personal: Map<String, VoiceCommand> = emptyMap()
             add(VoiceCommand.GIVE_UP, "포기", "포기할래", "정답 알려 줘")
             add(VoiceCommand.YES, "네", "예", "응", "좋아", "그래")
             add(VoiceCommand.NO, "아니", "아니요", "아니오", "싫어")
+            add(VoiceCommand.MISHEARD, "잘못 들었어", "잘못 알아들었어", "그거 아니야", "그 말 아니야", "다시 들어 줘")
+            add(VoiceCommand.EXPLAIN_WORD, "뜻이 뭐야", "무슨 뜻이야", "그게 무슨 뜻이야", "뜻 알려 줘")
         }
     }
 }

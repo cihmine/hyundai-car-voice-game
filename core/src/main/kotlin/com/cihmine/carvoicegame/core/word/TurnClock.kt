@@ -1,6 +1,5 @@
 package com.cihmine.carvoicegame.core.word
 
-import com.cihmine.carvoicegame.core.PlayMode
 import kotlinx.serialization.Serializable
 
 /**
@@ -36,13 +35,6 @@ data class TurnClock(
         return paused.copy(remainingMs = paused.remainingMs?.plus(ms))
     }
 
-    companion object {
-        const val PARKED_LIMIT_MS = 10_000L
-        const val WRONG_ANSWER_BONUS_MS = 5_000L
-
-        fun forMode(mode: PlayMode): TurnClock = when (mode) {
-            PlayMode.PARKED -> TurnClock(PARKED_LIMIT_MS, PARKED_LIMIT_MS)
-            PlayMode.DRIVING -> TurnClock(null, null)
-        }
-    }
+    /** 제한시간을 [ms] 로 새로 준다(힌트 연장 등). 멈춘 상태로 두고 안내가 끝난 뒤 [start] 한다. */
+    fun restart(ms: Long): TurnClock = if (limitMs == null) this else copy(remainingMs = ms, runningSinceMs = null)
 }

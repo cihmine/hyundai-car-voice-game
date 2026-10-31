@@ -37,6 +37,21 @@ data class WordGameState(
     val pendingConfirm: String? = null,
     val validUserWords: Int = 0,
     val outcome: Outcome? = null,
+    /** AI 가 새 단어를 말할 때마다 늘어나는 차례 번호. 지난 차례의 늦은 STT 결과를 버리는 데 쓴다. */
+    val turn: Int = 0,
+    /** "잘못 들었어"로 되돌릴 수 있는 직전 판정. 한 번 되돌리면 비운다. */
+    val lastTurn: LastTurn? = null,
+)
+
+/** 직전 판정을 되돌리기 위한 기록 */
+@Serializable
+data class LastTurn(
+    val word: String,
+    val accepted: Boolean,
+    /** 판정 직전의 시계(멈춘 상태) */
+    val clockBefore: TurnClock,
+    val lastAiWordBefore: String?,
+    val usedCountBefore: Int,
 )
 
 enum class RejectReason(val message: String) {
@@ -59,6 +74,14 @@ sealed interface TurnResult {
     data class Reconfirm(val heard: String?) : TurnResult
 
     data object NotAccepting : TurnResult
+}
+
+sealed interface CorrectionResult {
+    /** [word] 판정을 취소했다. 다시 말하게 한다. 인정했던 단어면 AI 단어도 함께 취소되어 [lastAiWord] 로 돌아간다. */
+    data class Undone(val word: String, val wasAccepted: Boolean, val lastAiWord: String?) : CorrectionResult
+
+    /** 되돌릴 판정이 없다(이미 정정했거나 아직 답하지 않음). 다시 말해 달라고만 한다. */
+    data object NothingToUndo : CorrectionResult
 }
 
 sealed interface HintResult {
@@ -84,6 +107,7 @@ class WordGame private constructor(
     state: WordGameState,
     private val dictionary: WordDictionary,
     private val random: Random,
+    private val rules: RuleConfig,
 ) {
     var state: WordGameState = state
         private set
@@ -100,33 +124,69 @@ class WordGame private constructor(
         update { copy(clock = clock.pause(now)) }
     }
 
-    /** STT 후보(n-best, 첫 번째가 가장 유력)를 받아 판정한다. 사전·규칙에 맞는 후보가 있으면 그것을 인정한다. */
-    fun submit(candidates: List<String>, now: Long): TurnResult {
-        if (!acceptingAnswer()) return TurnResult.NotAccepting
+    /**
+     * STT 후보(n-best, 첫 번째가 가장 유력)를 받아 판정한다. 사전·규칙에 맞는 후보가 있으면 그것을 인정한다.
+     * [turn] 을 넘기면 그 차례의 결과일 때만 받는다(종료·정정 뒤 늦게 온 결과 무시).
+     */
+    fun submit(candidates: List<String>, now: Long, turn: Int? = null): TurnResult {
+        if (!acceptingAnswer() || (turn != null && turn != state.turn)) return TurnResult.NotAccepting
         val normalized = candidates.map(Words::normalize).filter { it.isNotEmpty() }.distinct()
 
         normalized.firstOrNull { violation(it) == null }?.let { return accept(it, now) }
 
         val top = normalized.firstOrNull()
         if (top == null) {
-            update { copy(clock = clock.pause(now)) }
+            update { copy(clock = clock.pause(now), lastTurn = null) }
             return TurnResult.Reconfirm(null)
         }
         val reason = violation(top)!!
         if (reason == RejectReason.NOT_IN_DICTIONARY && state.pendingConfirm != top) {
-            update { copy(clock = clock.pause(now), pendingConfirm = top) }
+            update { copy(clock = clock.pause(now), pendingConfirm = top, lastTurn = null) }
             return TurnResult.Reconfirm(top)
         }
         update {
             copy(
-                clock = if (clock.hasLimit) clock.addBonus(TurnClock.WRONG_ANSWER_BONUS_MS, now) else clock,
+                clock = if (clock.hasLimit) clock.addBonus(rules.wrongAnswerBonusMs, now) else clock,
                 pendingConfirm = null,
+                lastTurn = recordTurn(top, accepted = false, now),
             )
         }
         return TurnResult.Rejected(top, reason)
     }
 
+    /**
+     * "잘못 들었어". 직전 판정(인정 또는 오답)을 취소하고 판정 전 남은 시간으로 되돌린다.
+     * 여러 번 말해도 한 번만 되돌리므로 단어·포인트가 겹쳐 반영되지 않는다. 끝난 판은 바꾸지 않는다.
+     */
+    fun correctLast(now: Long): CorrectionResult {
+        if (isFinished || state.paused) return CorrectionResult.NothingToUndo
+        val last = state.lastTurn
+        if (last == null) {
+            update { copy(clock = clock.pause(now), pendingConfirm = null) }
+            return CorrectionResult.NothingToUndo
+        }
+        update {
+            copy(
+                used = used.take(last.usedCountBefore),
+                lastAiWord = last.lastAiWordBefore,
+                validUserWords = if (last.accepted) validUserWords - 1 else validUserWords,
+                clock = last.clockBefore,
+                phase = WordPhase.AWAIT_USER,
+                pendingConfirm = null,
+                lastTurn = null,
+                turn = turn + 1,
+            )
+        }
+        return CorrectionResult.Undone(last.word, last.accepted, state.lastAiWord)
+    }
+
+    private fun recordTurn(word: String, accepted: Boolean, now: Long) = LastTurn(
+        word = word, accepted = accepted, clockBefore = state.clock.pause(now),
+        lastAiWordBefore = state.lastAiWord, usedCountBefore = state.used.size,
+    )
+
     private fun accept(word: String, now: Long): TurnResult {
+        val record = recordTurn(word, accepted = true, now)
         val used = state.used + word
         val aiEntry = picker.pick(
             options = optionsAfter(word, used.toSet()),
@@ -138,6 +198,7 @@ class WordGame private constructor(
                 copy(
                     used = used, validUserWords = validUserWords + 1, pendingConfirm = null,
                     clock = clock.pause(now), phase = WordPhase.FINISHED, outcome = Outcome.WIN,
+                    lastTurn = record,
                 )
             }
             return TurnResult.Accepted(word, null)
@@ -146,6 +207,7 @@ class WordGame private constructor(
             copy(
                 used = used + aiEntry.word, lastAiWord = aiEntry.word,
                 validUserWords = validUserWords + 1, pendingConfirm = null, clock = clock.reset(),
+                lastTurn = record, turn = turn + 1,
             )
         }
         return TurnResult.Accepted(word, aiEntry.word)
@@ -183,14 +245,17 @@ class WordGame private constructor(
 
     // ── 힌트·시간 ───────────────────────────────────────────
 
-    /** 단어 뜻을 설명하는 힌트. 정답 단어 자체는 말하지 않는다. 설명이 끝나면 새로 10초를 준다. */
+    /** 단어 뜻을 설명하는 힌트. 정답 단어 자체는 말하지 않는다. 설명이 끝나면 [RuleConfig.hintExtensionMs] 를 새로 준다. */
     fun requestHint(now: Long): HintResult {
         if (isFinished || state.paused) return HintResult.NotAccepting
         if (state.hintsLeft <= 0) return HintResult.NoHintsLeft
         val target = optionsAfter(state.lastAiWord ?: return HintResult.NoCandidate, state.used.toSet())
             .minByOrNull { it.level } ?: return HintResult.NoCandidate
         update {
-            copy(hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER, clock = clock.pause(now).reset())
+            copy(
+                hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER,
+                clock = clock.pause(now).restart(rules.hintExtensionMs),
+            )
         }
         return HintResult.Hint(target.meaning, state.hintsLeft)
     }
@@ -235,10 +300,18 @@ class WordGame private constructor(
         update { copy(paused = false) }
     }
 
-    /** 같은 판에서 모드 변경. 사용 단어·힌트는 유지, 주차로 바꾸면 안내 후 새로 10초 */
-    fun changeMode(mode: PlayMode, now: Long) {
-        if (isFinished || mode == state.mode) return
-        update { copy(mode = mode, clock = TurnClock.forMode(mode).pause(now)) }
+    /**
+     * 판 도중 차량 상태 변화. 움직이기 시작하면(또는 상태 불명) 제한시간을 즉시 없애고 힌트 제안도 거둔다.
+     * 주차로 바뀌어도 이번 판에는 제한시간을 새로 걸지 않는다 — 규칙은 한 판 동안 고정, 다음 판부터 주차 규칙.
+     */
+    fun changeMode(mode: PlayMode) {
+        if (isFinished || mode == state.mode || mode != PlayMode.DRIVING) return
+        update {
+            copy(
+                mode = mode, clock = rules.clockFor(mode),
+                phase = if (phase == WordPhase.OFFER_HINT) WordPhase.AWAIT_USER else phase,
+            )
+        }
     }
 
     fun giveUp(now: Long) = finish(Outcome.LOSE, now)
@@ -265,12 +338,6 @@ class WordGame private constructor(
         /** 초성 대결로 출제할 초성의 최소 후보 단어 수 */
         const val MIN_CHOSEONG_POOL = 6
 
-        fun hintsFor(difficulty: Difficulty): Int = when (difficulty) {
-            Difficulty.EASY -> 2
-            Difficulty.NORMAL -> 1
-            Difficulty.HARD -> 0
-        }
-
         /** 새 판. AI 가 첫 단어를 정해 [WordGameState.lastAiWord] 에 둔다. 안내가 끝난 뒤 [speechFinished] 로 시간을 시작한다. */
         fun start(
             kind: GameKind,
@@ -279,6 +346,7 @@ class WordGame private constructor(
             dictionary: WordDictionary,
             random: Random = Random.Default,
             roundId: String = newRoundId(random),
+            rules: RuleConfig = RuleConfig.DEFAULT,
         ): WordGame {
             require(kind.isWordGame) { "단어 게임이 아님: $kind" }
             val picker = WordPicker(random)
@@ -295,9 +363,9 @@ class WordGame private constructor(
             val game = WordGame(
                 WordGameState(
                     roundId = roundId, kind = kind, difficulty = difficulty, mode = mode, choseong = choseong,
-                    hintsLeft = hintsFor(difficulty), clock = TurnClock.forMode(mode),
+                    hintsLeft = rules.hintsFor(difficulty), clock = rules.clockFor(mode),
                 ),
-                dictionary, random,
+                dictionary, random, rules,
             )
             val first = picker.pick(firstOptions, difficulty, avoid = { game.isDeadEnd(it.word, setOf(it.word)) })
                 ?: error("첫 단어를 고를 수 없음 — 사전 확인 필요")
@@ -306,8 +374,12 @@ class WordGame private constructor(
         }
 
         /** 저장된 판을 불러온다. 재개 안내 전까지는 일시정지 상태다. */
-        fun restore(state: WordGameState, dictionary: WordDictionary, random: Random = Random.Default): WordGame =
-            WordGame(state.copy(paused = state.outcome == null), dictionary, random)
+        fun restore(
+            state: WordGameState,
+            dictionary: WordDictionary,
+            random: Random = Random.Default,
+            rules: RuleConfig = RuleConfig.DEFAULT,
+        ): WordGame = WordGame(state.copy(paused = state.outcome == null), dictionary, random, rules)
     }
 }
 

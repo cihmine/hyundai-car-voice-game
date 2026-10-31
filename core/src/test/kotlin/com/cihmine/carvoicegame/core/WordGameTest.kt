@@ -3,10 +3,11 @@ package com.cihmine.carvoicegame.core
 import com.cihmine.carvoicegame.core.hangul.Hangul
 import com.cihmine.carvoicegame.core.save.SaveCodec
 import com.cihmine.carvoicegame.core.save.SaveData
+import com.cihmine.carvoicegame.core.word.CorrectionResult
 import com.cihmine.carvoicegame.core.word.HintResult
 import com.cihmine.carvoicegame.core.word.RejectReason
 import com.cihmine.carvoicegame.core.word.TickResult
-import com.cihmine.carvoicegame.core.word.TurnClock
+import com.cihmine.carvoicegame.core.word.RuleConfig
 import com.cihmine.carvoicegame.core.word.TurnResult
 import com.cihmine.carvoicegame.core.word.WordDictionary
 import com.cihmine.carvoicegame.core.word.WordEntry
@@ -36,8 +37,8 @@ class WordGameTest {
     ): WordGame = WordGame.restore(
         WordGameState(
             roundId = "r1", kind = GameKind.WORD_CHAIN, difficulty = difficulty, mode = mode,
-            used = used, lastAiWord = lastAiWord, hintsLeft = WordGame.hintsFor(difficulty),
-            clock = TurnClock.forMode(mode),
+            used = used, lastAiWord = lastAiWord, hintsLeft = RuleConfig.DEFAULT.hintsFor(difficulty),
+            clock = RuleConfig.DEFAULT.clockFor(mode),
         ),
         dictionary, Random(seed),
     ).also { it.resume() }
@@ -150,14 +151,106 @@ class WordGameTest {
         assertIs<TurnResult.Accepted>(game.submit(listOf("과자"), 15_000))
     }
 
+
     @Test
-    fun `모드를 바꾸면 사용 단어와 힌트는 유지하고 주차로 바꾸면 새로 10초`() {
+    fun `주행으로 바뀌면 제한시간과 힌트 제안을 즉시 거둔다`() {
+        val game = chainGame("사과")
+        game.speechFinished(0)
+        assertEquals(TickResult.OfferHint, game.tick(10_000))
+        game.changeMode(PlayMode.DRIVING)
+        assertEquals(WordPhase.AWAIT_USER, game.state.phase)
+        game.speechFinished(11_000)
+        assertEquals(TickResult.None, game.tick(1_000_000))
+        assertIs<TurnResult.Accepted>(game.submit(listOf("과자"), 1_000_000))
+    }
+
+    @Test
+    fun `주차로 바뀌어도 이번 판에는 제한시간을 걸지 않는다`() {
         val game = chainGame("사과", mode = PlayMode.DRIVING)
-        game.changeMode(PlayMode.PARKED, now = 50_000)
+        game.changeMode(PlayMode.PARKED)
+        assertEquals(PlayMode.DRIVING, game.state.mode)
+        game.speechFinished(0)
+        assertEquals(TickResult.None, game.tick(60_000))
+    }
+
+    @Test
+    fun `잘못 들었어 - 끝난 판은 바꾸지 않는다`() {
+        val game = chainGame("노사", dictionary = dict("사과", "노력"))
+        assertEquals(TurnResult.Accepted("사과", null), game.submit(listOf("사과"), 0))
+        assertEquals(CorrectionResult.NothingToUndo, game.correctLast(1_000))
+        assertEquals(Outcome.WIN, game.state.outcome)
+    }
+
+    @Test
+    fun `잘못 들었어 - 인정한 단어와 AI 단어를 취소하고 판정 전 남은 시간으로 돌아간다`() {
+        val game = chainGame("사과")
+        game.speechFinished(0)
+        game.submit(listOf("과자"), now = 3_000)
+        val turnAfterAccept = game.state.turn
+        val undone = game.correctLast(4_000)
+        assertEquals(CorrectionResult.Undone("과자", wasAccepted = true, lastAiWord = "사과"), undone)
         assertEquals(listOf("사과"), game.state.used)
-        game.speechFinished(51_000)
-        assertEquals(TickResult.None, game.tick(60_999))
-        assertEquals(TickResult.OfferHint, game.tick(61_000))
+        assertEquals(0, game.state.validUserWords)
+        assertEquals(7_000, game.state.clock.remaining(10_000), "판정 전 남은 7초, 멈춘 상태")
+        assertTrue(game.state.turn > turnAfterAccept)
+    }
+
+    @Test
+    fun `잘못 들었어를 세 번 말해도 한 번만 되돌린다`() {
+        val game = chainGame("사과")
+        game.speechFinished(0)
+        game.submit(listOf("과자"), now = 1_000)
+        game.speechFinished(2_000)
+        game.submit(listOf("석류"), now = 3_000)
+        assertEquals(listOf("사과", "과자", "자석", "석류", "유리"), game.state.used)
+
+        assertIs<CorrectionResult.Undone>(game.correctLast(4_000))
+        assertEquals(CorrectionResult.NothingToUndo, game.correctLast(4_100))
+        assertEquals(CorrectionResult.NothingToUndo, game.correctLast(4_200))
+        assertEquals(listOf("사과", "과자", "자석"), game.state.used)
+        assertEquals(1, game.state.validUserWords)
+        assertEquals("자석", game.state.lastAiWord)
+    }
+
+    @Test
+    fun `잘못 들었어 - 오답 처리를 취소하면 추가 5초도 취소된다`() {
+        val game = chainGame("사과")
+        game.speechFinished(0)
+        game.submit(listOf("유리"), now = 4_000)
+        assertEquals(11_000, game.state.clock.remaining(4_000))
+        assertEquals(CorrectionResult.Undone("유리", wasAccepted = false, lastAiWord = "사과"), game.correctLast(5_000))
+        assertEquals(6_000, game.state.clock.remaining(5_000))
+    }
+
+    @Test
+    fun `지난 차례의 늦은 인식 결과는 받지 않는다`() {
+        val game = chainGame("사과")
+        val oldTurn = game.state.turn
+        game.submit(listOf("과자"), now = 0, turn = oldTurn)
+        assertEquals(TurnResult.NotAccepting, game.submit(listOf("석류"), now = 1_000, turn = oldTurn))
+        assertIs<TurnResult.Accepted>(game.submit(listOf("석류"), now = 1_000, turn = game.state.turn))
+    }
+
+    @Test
+    fun `시간 규칙은 RuleConfig 값을 따른다`() {
+        val rules = RuleConfig(parkedLimitMs = 8_000, wrongAnswerBonusMs = 3_000, hintExtensionMs = 15_000, normalHints = 1)
+        val game = WordGame.restore(
+            WordGameState(
+                roundId = "r", kind = GameKind.WORD_CHAIN, difficulty = Difficulty.NORMAL, mode = PlayMode.PARKED,
+                used = listOf("사과"), lastAiWord = "사과", hintsLeft = rules.hintsFor(Difficulty.NORMAL),
+                clock = rules.clockFor(PlayMode.PARKED),
+            ),
+            chainDict, Random(1), rules,
+        ).also { it.resume() }
+        game.speechFinished(0)
+        game.submit(listOf("유리"), now = 2_000)
+        assertEquals(9_000, game.state.clock.remaining(2_000), "남은 6초 + 오답 3초")
+        game.speechFinished(2_000)
+        assertEquals(TickResult.OfferHint, game.tick(11_000))
+        game.requestHint(11_000)
+        game.speechFinished(12_000)
+        assertEquals(TickResult.None, game.tick(26_999), "힌트 뒤에는 기본 8초가 아닌 15초")
+        assertEquals(TickResult.TimeUp, game.tick(27_000))
     }
 
     @Test
@@ -201,7 +294,7 @@ class WordGameTest {
         WordGameState(
             roundId = "c1", kind = GameKind.CHOSEONG, difficulty = Difficulty.EASY, mode = PlayMode.DRIVING,
             choseong = "ㅅㄱ", used = listOf("사과"), lastAiWord = "사과", hintsLeft = 2,
-            clock = TurnClock.forMode(PlayMode.DRIVING),
+            clock = RuleConfig.DEFAULT.clockFor(PlayMode.DRIVING),
         ),
         choseongDict, Random(1),
     ).also { it.resume() }
