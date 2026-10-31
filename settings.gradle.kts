@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Pleos Playground SDK(음성 인식·안내)
+        maven("https://nexus-playground.pleos.ai/repository/maven-releases/")
     }
 }
 
