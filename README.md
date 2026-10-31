@@ -19,6 +19,8 @@
 | 파일 | 내용 |
 |---|---|
 | [`docs/PLAN.md`](docs/PLAN.md) | 개발 계획서 — 구현 범위(P0/P1), 게임 규칙, 상태 모델, 검증 사례 |
+| [`docs/COMMON.md`](docs/COMMON.md) | 세 앱 공통 개발·빌드·검증 원칙, 일정, release 절차 |
+| [`docs/SUBMISSION.md`](docs/SUBMISSION.md) | 1차 제출·가산점 준비 체크리스트 |
 
 ## 실행
 
