@@ -55,7 +55,8 @@ data class LastTurn(
 )
 
 enum class RejectReason(val message: String) {
-    NOT_IN_DICTIONARY("사전에서 찾을 수 없는 단어예요"),
+    // 단어장이 표준 사전보다 작으므로 "없는 말"이라고 단정하지 않는다.
+    NOT_IN_DICTIONARY("제 단어장에 없는 단어예요"),
     ALREADY_USED("이번 판에서 이미 나온 단어예요"),
     WRONG_START("앞 단어의 끝 글자로 시작하지 않아요"),
     TOO_SHORT("두 글자 이상이어야 해요"),

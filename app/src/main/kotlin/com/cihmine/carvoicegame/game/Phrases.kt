@@ -43,7 +43,7 @@ object Phrases {
 
     fun reconfirm(heard: String?) =
         if (heard == null) "잘 못 들었어요. 다시 말씀해 주세요."
-        else "$heard, 라고 하셨나요? 사전에서 찾지 못했어요. 맞으면 한 번 더, 아니면 다시 말씀해 주세요."
+        else "$heard, 라고 하셨나요? 제 단어장에서 찾지 못했어요. 맞으면 한 번 더, 아니면 다시 말씀해 주세요."
 
     fun userWins(word: String, points: Int) =
         "$word! 이어 갈 단어가 생각나지 않네요. 제가 졌어요." + if (points > 0) " ${points}포인트를 드릴게요." else ""
