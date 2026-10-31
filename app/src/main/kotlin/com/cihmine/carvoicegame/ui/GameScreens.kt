@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -141,6 +143,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
 
 // ── 진행 ───────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlayingScreen(ui: GameUi, c: GameController) {
     val round = ui.round ?: return
@@ -169,7 +172,8 @@ private fun PlayingScreen(ui: GameUi, c: GameController) {
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 화면 폭에 따라 버튼이 넘치지 않게 줄을 바꾼다.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (round.paused) {
                     Button(onClick = c::resume, Modifier.height(56.dp)) { Text("계속", fontSize = 20.sp) }
                 } else {

@@ -2,9 +2,9 @@ package com.cihmine.carvoicegame.game
 
 import android.app.Application
 import android.os.SystemClock
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.cihmine.carvoicegame.DebugLog
 import com.cihmine.carvoicegame.core.Difficulty
 import com.cihmine.carvoicegame.core.GameKind
 import com.cihmine.carvoicegame.core.Outcome
@@ -144,7 +144,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     // ── 말하기·듣기 ─────────────────────────────────────────
 
     private fun say(text: String, then: () -> Unit) {
-        Log.d(TAG, "say: $text")
+        DebugLog.d(TAG) { "say: $text" }
         stt.cancel()
         listenToken++
         game?.speechStarted(now())
@@ -214,7 +214,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     }
 
     private fun onUtterance(candidates: List<String>, turn: Int?) {
-        Log.d(TAG, "heard: $candidates ask=${_ui.value.ask}")
+        DebugLog.d(TAG) { "heard: $candidates ask=${_ui.value.ask}" }
         val g = game ?: return
         val top = candidates.first()
         log(true, top)
@@ -341,7 +341,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     }
 
     private fun answerAsk(ask: Ask, parsed: ParsedUtterance) {
-        Log.d(TAG, "answer $ask <- $parsed")
+        DebugLog.d(TAG) { "answer $ask <- $parsed" }
         val command = (parsed as? ParsedUtterance.Command)?.command
         val yes = command == VoiceCommand.YES || (ask == Ask.RESUME && command == VoiceCommand.RESUME) ||
             (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT)

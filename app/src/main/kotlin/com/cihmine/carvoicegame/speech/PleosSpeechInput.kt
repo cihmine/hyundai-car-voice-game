@@ -9,6 +9,7 @@ import ai.pleos.playground.stt.constant.ErrorType
 import ai.pleos.playground.stt.constant.Mode
 import ai.pleos.playground.stt.listener.OnInitializeListener
 import ai.pleos.playground.stt.listener.ResultListener
+import com.cihmine.carvoicegame.DebugLog
 import com.cihmine.carvoicegame.core.port.SpeechError
 import com.cihmine.carvoicegame.core.port.SpeechInput
 import java.util.Locale
@@ -76,7 +77,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     }
 
     private fun deliver(text: String, completed: Boolean) {
-        Log.d(TAG, "onUpdated \"$text\" completed=$completed active=${current != null}")
+        DebugLog.d(TAG) { "onUpdated \"$text\" completed=$completed active=${current != null}" }
         val listener = current ?: return
         if (text.isNotBlank() && !heardSpeech) {
             heardSpeech = true
@@ -88,7 +89,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     }
 
     private fun fail(error: SpeechError) {
-        Log.d(TAG, "fail $error active=${current != null}")
+        DebugLog.d(TAG) { "fail $error active=${current != null}" }
         val listener = current ?: return
         current = null
         listener.onError(error)

@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -19,9 +20,28 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // 서명 키는 저장소 밖에 둔다. 위치는 -Pcarvoicegame.signing=경로 로 바꿀 수 있고,
+        // 파일이 없으면 release 는 서명 없이 만들어진다(설치용 APK 아님).
+        val props = file(
+            providers.gradleProperty("carvoicegame.signing")
+                .getOrElse("${System.getProperty("user.home")}/.android-keys/carvoicegame.properties"),
+        )
+        if (props.exists()) {
+            val p = Properties().apply { props.inputStream().use(::load) }
+            create("release") {
+                storeFile = file(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 
@@ -32,6 +52,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

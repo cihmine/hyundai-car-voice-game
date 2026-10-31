@@ -9,6 +9,7 @@ import ai.pleos.playground.tts.constant.ErrorType
 import ai.pleos.playground.tts.constant.Mode
 import ai.pleos.playground.tts.listener.EventListener
 import ai.pleos.playground.tts.listener.OnInitializeListener
+import com.cihmine.carvoicegame.DebugLog
 import java.util.Locale
 
 /**
@@ -28,21 +29,21 @@ class PleosSpeechOutput(context: Context, onReady: (Boolean) -> Unit) : VoiceOut
 
     private val events = object : EventListener {
         override fun onStart() {
-            Log.d(TAG, "onStart")
+            DebugLog.d(TAG) { "onStart" }
             main.post { started = true }
         }
 
         override fun onDone() {
-            Log.d(TAG, "onDone")
+            DebugLog.d(TAG) { "onDone" }
             main.post { if (started) finish() }
         }
 
         override fun onStop() {
-            Log.d(TAG, "onStop")
+            DebugLog.d(TAG) { "onStop" }
         }
 
         override fun onReady() {
-            Log.d(TAG, "onReady")
+            DebugLog.d(TAG) { "onReady" }
         }
 
         override fun onUpdatedRms(rms: Double) = Unit

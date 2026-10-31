@@ -25,14 +25,33 @@
 
 ## 실행
 
-요구 사항: Android Studio(JDK 17 이상), Android SDK 36
+요구 사항: Android Studio(JDK 17 이상), Android SDK 36. Pleos SDK 는 `settings.gradle.kts` 의 Pleos Maven 저장소에서 받는다.
 
 ```bash
-./gradlew :core:test          # 규칙 엔진 단위 테스트
+./gradlew :core:test          # 규칙 엔진·사전 데이터 테스트
 ./gradlew :app:assembleDebug  # 디버그 APK
+./gradlew :app:assembleRelease # release APK(서명 설정이 있을 때만 서명됨)
 ```
 
-테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive)
+release 서명 키는 저장소에 넣지 않는다. 기본 위치 `~/.android-keys/carvoicegame.properties`(storeFile·storePassword·keyAlias·keyPassword), 다른 곳이면 `-Pcarvoicegame.signing=경로`.
+
+테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive, 2560×1440). 일반 안드로이드 기기에서도 실행된다.
+
+### 음성
+
+- Pleos 음성 서비스가 있는 기기(차량·Pleos 에뮬레이터): Pleos TTS·STT SDK(기기 내 처리)
+- 그 밖의 기기: 안드로이드 기본 음성 인식·TTS
+- 음성 인식이 없으면 시연 패널의 글자 입력으로 같은 흐름을 진행한다(화면에 "글자 입력 대체 시연" 표시).
+
+### 실제 기능과 모의 기능
+
+| 구분 | 내용 |
+|---|---|
+| 실제 | 끝말잇기·초성 대결 규칙 엔진, 음성 안내·인식(Pleos SDK), 제한시간·힌트, 잘못 들었어 정정, 저장·이어하기, 기록·포인트(중복 지급 방지) |
+| 모의 | 차량 주차·주행 상태(시연 패널), 내비 안내 끼어들기, 주유·충전 쿠폰(데모 — 사용 불가) |
+| 준비 중 | 스무고개·양세찬 게임, 외부 AI·사전 검색 |
+
+기록·포인트는 기기 안에만 저장되며 앱을 지우거나 데이터를 초기화하면 사라진다. 단어 목록은 자체 작성한 일반 명사 441개다.
 
 ## APK
 
