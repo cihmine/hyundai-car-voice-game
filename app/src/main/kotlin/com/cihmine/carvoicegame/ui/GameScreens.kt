@@ -138,7 +138,18 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
             ) { Text("보관함 · ${ui.save.ledger.balance}P", fontSize = 20.sp) }
         }
         if (ui.vehicle != VehicleState.PARKED) Text("보관함·쿠폰 교환은 주차 중에만 열 수 있어요")
+        DictionaryCredit()
     }
+}
+
+/** 우리말샘 단어 데이터의 CC BY-SA 2.0 KR 저작자 표시. */
+@Composable
+private fun DictionaryCredit() {
+    Text(
+        "단어·뜻풀이 일부 출처: 국립국어원 우리말샘(opendict.korean.go.kr), CC BY-SA 2.0 KR",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 // ── 진행 ───────────────────────────────────────────────────
@@ -269,6 +280,7 @@ private fun LockerScreen(ui: GameUi, c: GameController) {
             }
         }
         message?.let { Text(it) }
+        DictionaryCredit()
         Text("최근 기록", style = MaterialTheme.typography.titleLarge)
         if (ui.save.history.isEmpty()) Text("아직 기록이 없어요")
         LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {

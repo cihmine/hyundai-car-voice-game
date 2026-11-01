@@ -39,10 +39,13 @@ class WordDictionary(entries: Iterable<WordEntry>) {
                 .toList(),
         )
 
-        /** 앱에 넣는 단어 파일들. 모두 자체 작성한 일반 명사와 뜻풀이다. */
+        /**
+         * 앱에 넣는 단어 파일들. words_more_* 까지는 자체 작성, words_opendict.tsv 는
+         * 국립국어원 우리말샘(CC BY-SA 2.0 KR)에서 tools/fetch-opendict.mjs 로 받은 것이다.
+         */
         val BUNDLED_FILES = listOf(
             "/data/sample_words.tsv", "/data/words_more_1.tsv", "/data/words_more_2.tsv",
-            "/data/words_more_3.tsv",
+            "/data/words_more_3.tsv", "/data/words_opendict.tsv",
         )
 
         fun loadSample(): WordDictionary =

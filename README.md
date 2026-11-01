@@ -51,7 +51,11 @@ release 서명 키는 저장소에 넣지 않는다. 기본 위치 `~/.android-k
 | 모의 | 차량 주차·주행 상태(시연 패널), 내비 안내 끼어들기, 주유·충전 쿠폰(데모 — 사용 불가) |
 | 준비 중 | 스무고개·양세찬 게임, 외부 AI·사전 검색 |
 
-기록·포인트는 기기 안에만 저장되며 앱을 지우거나 데이터를 초기화하면 사라진다. 단어 목록은 자체 작성한 일반 명사 699개다(표준 사전보다 작아 실제 단어도 "단어장에 없다"고 할 수 있다).
+기록·포인트는 기기 안에만 저장되며 앱을 지우거나 데이터를 초기화하면 사라진다. 단어 목록은 자체 작성한 일반 명사 699개와 우리말샘에서 받은 명사 18,512개다(사전에 없는 말은 "단어장에 없다"고 안내한다).
+
+### 단어 데이터 출처·라이선스
+
+`core/src/main/resources/data/words_opendict.tsv`는 국립국어원 우리말샘(https://opendict.korean.go.kr)의 표제어와 뜻풀이를 `tools/fetch-opendict.mjs`로 받아 줄인 것이며, **이 파일만** 원자료와 같은 [CC BY-SA 2.0 KR](https://creativecommons.org/licenses/by-sa/2.0/kr/) 라이선스를 따른다. 앱 홈·보관함 화면에도 출처를 표시한다. 다시 받으려면 우리말샘 오픈 API 키를 `OPENDICT_KEY` 환경 변수나 `~/.config/carvoicegame/opendict.key`에 넣고 `node tools/fetch-opendict.mjs`를 실행한다(키는 저장소에 넣지 않는다).
 
 ## APK
 
