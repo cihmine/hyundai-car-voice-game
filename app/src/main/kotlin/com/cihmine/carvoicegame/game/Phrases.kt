@@ -41,6 +41,18 @@ object Phrases {
         else -> "끝말잇기, ${difficulty.label} 단계예요. 제가 먼저 할게요. $firstWord"
     }
 
+    const val BRAND_MODE = "브랜드 단어 허용 모드예요. 데모 브랜드 단어가 나올 수 있고, 궁금하면 '그게 뭐야', 끄려면 '광고 꺼 줘'라고 말씀해 주세요."
+
+    /** 광고 단어를 말할 때 고지를 빠뜨리지 않는다. 고지 문구는 게임 단어로 판정하지 않는다. */
+    fun adWord(disclosure: String, word: String) = "$disclosure $word"
+
+    /** 사용자가 물었을 때만 읽는 승인된 짧은 소개. 소개 문구에 없는 내용은 덧붙이지 않는다. */
+    fun adExplanation(shortExplanation: String, word: String) =
+        "브랜드 소개 데모예요. $shortExplanation 제 단어는 $word, '${word.last()}' 자로 이어 주세요."
+
+    const val AD_OFF = "광고 단어 유도를 껐어요. 이번 판 규칙과 포인트는 그대로예요."
+    const val NO_ADS = "지금은 일반 모드라 광고 단어가 나오지 않아요."
+
     fun reconfirm(heard: String?) =
         if (heard == null) "잘 못 들었어요. 다시 말씀해 주세요."
         else "$heard, 라고 하셨나요? 제 단어장에서 찾지 못했어요. 맞으면 한 번 더, 아니면 다시 말씀해 주세요."

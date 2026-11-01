@@ -5,6 +5,11 @@ import com.cihmine.carvoicegame.core.GameKind
 import com.cihmine.carvoicegame.core.Outcome
 import com.cihmine.carvoicegame.core.PlayMode
 import com.cihmine.carvoicegame.core.Words
+import com.cihmine.carvoicegame.core.ad.AdPlanner
+import com.cihmine.carvoicegame.core.ad.BrandRound
+import com.cihmine.carvoicegame.core.ad.DecisionReason
+import com.cihmine.carvoicegame.core.ad.PlanInput
+import com.cihmine.carvoicegame.core.ad.PlanSummary
 import com.cihmine.carvoicegame.core.hangul.Hangul
 import kotlinx.serialization.Serializable
 import kotlin.random.Random
@@ -41,6 +46,12 @@ data class WordGameState(
     val turn: Int = 0,
     /** "잘못 들었어"로 되돌릴 수 있는 직전 판정. 한 번 되돌리면 비운다. */
     val lastTurn: LastTurn? = null,
+    /** 브랜드 단어 허용 모드(끝말잇기만). null 이면 일반 모드 */
+    val brand: BrandRound? = null,
+    /** AI 의 직전 단어가 광고 계획으로 고른 광고 단어면 그 캠페인 */
+    val lastAiAdCampaignId: String? = null,
+    /** 직전 AI 단어 선택의 진단 정보(개발자 패널용) */
+    val lastPlan: PlanSummary? = null,
 )
 
 /** 직전 판정을 되돌리기 위한 기록 */
@@ -52,6 +63,7 @@ data class LastTurn(
     val clockBefore: TurnClock,
     val lastAiWordBefore: String?,
     val usedCountBefore: Int,
+    val lastAiAdBefore: String? = null,
 )
 
 enum class RejectReason(val message: String) {
@@ -106,12 +118,17 @@ sealed interface TickResult {
  */
 class WordGame private constructor(
     state: WordGameState,
-    private val dictionary: WordDictionary,
+    baseDictionary: WordDictionary,
     private val random: Random,
     private val rules: RuleConfig,
+    private val planner: AdPlanner?,
 ) {
     var state: WordGameState = state
         private set
+
+    /** 브랜드 모드면 판을 시작할 때 고정한 브랜드 단어를 더한 사전. 사람과 AI 에 똑같이 쓴다. */
+    private val dictionary = baseDictionary.plus(state.brand?.entries.orEmpty())
+    private val aliases: Map<String, String> = state.brand?.aliases.orEmpty()
 
     private val picker = WordPicker(random)
 
@@ -131,7 +148,8 @@ class WordGame private constructor(
      */
     fun submit(candidates: List<String>, now: Long, turn: Int? = null): TurnResult {
         if (!acceptingAnswer() || (turn != null && turn != state.turn)) return TurnResult.NotAccepting
-        val normalized = candidates.map(Words::normalize).filter { it.isNotEmpty() }.distinct()
+        // 승인된 다른 표기는 정식 표기로 바꿔 같은 단어로 중복 검사한다.
+        val normalized = candidates.map(Words::normalize).filter { it.isNotEmpty() }.map { aliases[it] ?: it }.distinct()
 
         normalized.firstOrNull { violation(it) == null }?.let { return accept(it, now) }
 
@@ -170,6 +188,7 @@ class WordGame private constructor(
             copy(
                 used = used.take(last.usedCountBefore),
                 lastAiWord = last.lastAiWordBefore,
+                lastAiAdCampaignId = last.lastAiAdBefore,
                 validUserWords = if (last.accepted) validUserWords - 1 else validUserWords,
                 clock = last.clockBefore,
                 phase = WordPhase.AWAIT_USER,
@@ -184,16 +203,13 @@ class WordGame private constructor(
     private fun recordTurn(word: String, accepted: Boolean, now: Long) = LastTurn(
         word = word, accepted = accepted, clockBefore = state.clock.pause(now),
         lastAiWordBefore = state.lastAiWord, usedCountBefore = state.used.size,
+        lastAiAdBefore = state.lastAiAdCampaignId,
     )
 
     private fun accept(word: String, now: Long): TurnResult {
         val record = recordTurn(word, accepted = true, now)
         val used = state.used + word
-        val aiEntry = picker.pick(
-            options = optionsAfter(word, used.toSet()),
-            difficulty = state.difficulty,
-            avoid = { isDeadEnd(it.word, used.toSet() + it.word) },
-        )
+        val (aiEntry, plan) = chooseAiWord(used.toSet(), word)
         if (aiEntry == null) {
             update {
                 copy(
@@ -209,9 +225,42 @@ class WordGame private constructor(
                 used = used + aiEntry.word, lastAiWord = aiEntry.word,
                 validUserWords = validUserWords + 1, pendingConfirm = null, clock = clock.reset(),
                 lastTurn = record, turn = turn + 1,
+                lastAiAdCampaignId = plan?.campaignId?.takeIf { plan.reason == DecisionReason.DIRECT_AD },
+                lastPlan = plan,
+                brand = brand?.let { b ->
+                    b.copy(
+                        adShown = b.adShown || plan?.reason == DecisionReason.DIRECT_AD,
+                        steeringUsed = b.steeringUsed + if (plan?.reason == DecisionReason.STEERING) 1 else 0,
+                    )
+                },
             )
         }
         return TurnResult.Accepted(word, aiEntry.word)
+    }
+
+    /**
+     * AI 단어 선택. 일반 정책은 브랜드 단어를 고르지 않는다. 브랜드 모드면 광고 계획이 같은 합법 후보 안에서
+     * 광고 단어(바로 노출)나 광고로 이어질 일반 단어(유도)를 고를 수 있다. 판정 규칙은 바꾸지 않는다.
+     */
+    private fun chooseAiWord(used: Set<String>, userWord: String): Pair<WordEntry?, PlanSummary?> {
+        val options = optionsAfter(userWord, used)
+        val baseline = picker.pick(
+            options = options.filter { !it.isBrand },
+            difficulty = state.difficulty,
+            avoid = { isDeadEnd(it.word, used + it.word) },
+        )
+        val brand = state.brand
+        if (planner == null || brand == null || state.kind != GameKind.WORD_CHAIN) return baseline to null
+        val decision = planner.choose(
+            PlanInput(dictionary, options, used, state.difficulty, state.validUserWords + 1, brand, baseline, random),
+        )
+        return decision.chosen to decision.summary
+    }
+
+    /** "광고 꺼 줘". 바로 유도를 멈춘다. 이번 판의 허용 단어 목록과 포인트 규칙은 그대로다. */
+    fun disableAds() {
+        val brand = state.brand ?: return
+        update { copy(brand = brand.copy(adEnabled = false)) }
     }
 
     private fun violation(word: String): RejectReason? {
@@ -250,8 +299,9 @@ class WordGame private constructor(
     fun requestHint(now: Long): HintResult {
         if (isFinished || state.paused) return HintResult.NotAccepting
         if (state.hintsLeft <= 0) return HintResult.NoHintsLeft
+        // 힌트로 광고 소개가 나가지 않도록 브랜드 단어는 고르지 않는다.
         val target = optionsAfter(state.lastAiWord ?: return HintResult.NoCandidate, state.used.toSet())
-            .minByOrNull { it.level } ?: return HintResult.NoCandidate
+            .filter { !it.isBrand }.minByOrNull { it.level } ?: return HintResult.NoCandidate
         update {
             copy(
                 hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER,
@@ -348,8 +398,11 @@ class WordGame private constructor(
             random: Random = Random.Default,
             roundId: String = newRoundId(random),
             rules: RuleConfig = RuleConfig.DEFAULT,
+            brand: BrandRound? = null,
+            planner: AdPlanner? = null,
         ): WordGame {
             require(kind.isWordGame) { "단어 게임이 아님: $kind" }
+            require(brand == null || kind == GameKind.WORD_CHAIN) { "브랜드 단어 모드는 끝말잇기만" }
             val picker = WordPicker(random)
             val choseong = if (kind == GameKind.CHOSEONG) {
                 dictionary.choseongPairs(MIN_CHOSEONG_POOL).randomOrNull(random)
@@ -360,13 +413,13 @@ class WordGame private constructor(
             val firstOptions = when (kind) {
                 GameKind.CHOSEONG -> dictionary.withChoseong(choseong!!).filter { it.word.length == 2 }
                 else -> dictionary.entries.filter { it.word.length >= 2 }
-            }
+            }.filter { !it.isBrand }
             val game = WordGame(
                 WordGameState(
                     roundId = roundId, kind = kind, difficulty = difficulty, mode = mode, choseong = choseong,
-                    hintsLeft = rules.hintsFor(difficulty), clock = rules.clockFor(mode),
+                    hintsLeft = rules.hintsFor(difficulty), clock = rules.clockFor(mode), brand = brand,
                 ),
-                dictionary, random, rules,
+                dictionary, random, rules, planner,
             )
             val first = picker.pick(firstOptions, difficulty, avoid = { game.isDeadEnd(it.word, setOf(it.word)) })
                 ?: error("첫 단어를 고를 수 없음 — 사전 확인 필요")
@@ -380,7 +433,8 @@ class WordGame private constructor(
             dictionary: WordDictionary,
             random: Random = Random.Default,
             rules: RuleConfig = RuleConfig.DEFAULT,
-        ): WordGame = WordGame(state.copy(paused = state.outcome == null), dictionary, random, rules)
+            planner: AdPlanner? = null,
+        ): WordGame = WordGame(state.copy(paused = state.outcome == null), dictionary, random, rules, planner)
     }
 }
 

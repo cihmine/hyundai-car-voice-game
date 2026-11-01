@@ -9,6 +9,11 @@ import com.cihmine.carvoicegame.core.Difficulty
 import com.cihmine.carvoicegame.core.GameKind
 import com.cihmine.carvoicegame.core.Outcome
 import com.cihmine.carvoicegame.core.RewardPolicy
+import com.cihmine.carvoicegame.core.ad.AdEvent
+import com.cihmine.carvoicegame.core.ad.AdEventType
+import com.cihmine.carvoicegame.core.ad.AdPlanner
+import com.cihmine.carvoicegame.core.ad.BrandRound
+import com.cihmine.carvoicegame.core.ad.CampaignCatalog
 import com.cihmine.carvoicegame.core.command.CommandParser
 import com.cihmine.carvoicegame.core.command.ParsedUtterance
 import com.cihmine.carvoicegame.core.command.SpeechRate
@@ -79,6 +84,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private val rules = RuleConfig.DEFAULT
     private val dictionary = WordDictionary.loadSample()
+    private val catalog = CampaignCatalog.loadDemo()
+    private val planner = AdPlanner()
     private val store = FileSaveStore(app.filesDir)
     val vehicle = MockVehicleStatus()
 
@@ -94,6 +101,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private var listenToken = 0
     private var ticker: Job? = null
     private var pausedByAudioFocus = false
+
+    /** 지금 읽고 있는 광고 단어(중단 기록용) */
+    private var speakingAd: AdEvent? = null
 
     private val save get() = _ui.value.save
     private val parser get() = CommandParser(save.personalCommands)
@@ -117,7 +127,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     fun start(kind: GameKind, difficulty: Difficulty) {
         stopVoice()
         focus.acquire()
-        game = WordGame.start(kind, difficulty, vehicle.currentMode(), dictionary, rules = rules)
+        game = WordGame.start(kind, difficulty, vehicle.currentMode(), dictionary, rules = rules, brand = brandRoundFor(kind), planner = planner)
         _ui.update { it.copy(screen = Screen.PLAYING, log = emptyList(), lastReward = 0, notice = null) }
         publish()
         if (kind !in save.rulesOffered) {
@@ -128,17 +138,31 @@ class GameController(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 브랜드 단어 허용 모드를 골랐으면 지금 유효한 데모 캠페인으로 이번 판 허용 목록을 고정한다.
+     * 광고 간격은 판을 넘어 적용되도록 저장된 마지막 광고 시각을 넘긴다.
+     */
+    private fun brandRoundFor(kind: GameKind): BrandRound? {
+        if (kind != GameKind.WORD_CHAIN || !save.brandMode) return null
+        val campaigns = catalog.eligibleForRound(dictionary, System.currentTimeMillis())
+        if (campaigns.isEmpty()) return null
+        return BrandRound(campaigns, lastAdStartedAtEpochMs = save.adLog.lastStartedAtEpochMs)
+    }
+
+    fun setBrandMode(on: Boolean) = updateSave { copy(brandMode = on) }
+
     /** 강제 종료 등으로 남은 판. 일시정지 상태로 불러오고 사용자가 이어하기를 눌러야 진행한다. */
     fun continueSaved() {
         val state = save.wordGame?.takeIf { it.outcome == null } ?: return
-        game = WordGame.restore(state, dictionary, rules = rules)
+        game = WordGame.restore(state, dictionary, rules = rules, planner = planner)
         _ui.update { it.copy(screen = Screen.PLAYING, log = emptyList(), notice = "일시정지된 판을 불러왔어요") }
         publish()
     }
 
     private fun speakOpening() {
         val s = game?.state ?: return
-        say(Phrases.opening(s.kind, s.difficulty, s.choseong, s.lastAiWord!!)) { aiSpoke() }
+        val opening = Phrases.opening(s.kind, s.difficulty, s.choseong, s.lastAiWord!!)
+        say(if (s.brand != null) "${Phrases.BRAND_MODE} $opening" else opening) { aiSpoke() }
     }
 
     // ── 말하기·듣기 ─────────────────────────────────────────
@@ -242,7 +266,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
                     finishRound(Phrases.userWins(r.userWord, points))
                 } else {
                     persist()
-                    say(r.aiWord!!) { aiSpoke() }
+                    if (g.state.lastAiAdCampaignId != null) sayAdWord() else say(r.aiWord!!) { aiSpoke() }
                 }
             }
             is TurnResult.Rejected -> {
@@ -276,12 +300,65 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 }
                 CorrectionResult.NothingToUndo -> say(Phrases.SAY_AGAIN) { aiSpoke() }
             }
+            VoiceCommand.AD_OFF -> disableAds()
             VoiceCommand.EXPLAIN_WORD -> {
+                if (g.state.lastAiAdCampaignId != null) return explainAd()
                 val word = g.state.lastAiWord
                 val meaning = word?.let { dictionary.lookup(it)?.meaning }
                 repeatPrompt(if (meaning != null) "${Phrases.withTopic(word)} $meaning." else "설명할 단어가 없어요.")
             }
         }
+    }
+
+    // ── 브랜드 단어(광고) ──────────────────────────────────
+
+    private fun adEvent(type: AdEventType): AdEvent? {
+        val s = game?.state ?: return null
+        val id = s.lastAiAdCampaignId ?: return null
+        return AdEvent(s.roundId, s.turn, id, type, System.currentTimeMillis())
+    }
+
+    private fun recordAd(event: AdEvent?) {
+        if (event != null) updateSave { copy(adLog = adLog.record(event)) }
+    }
+
+    /** AI 가 고른 광고 단어를 고지와 함께 읽는다. 빈도 제한은 재생 시작부터 소비한다. */
+    private fun sayAdWord() {
+        val s = game?.state ?: return
+        val word = s.lastAiWord ?: return
+        val campaign = s.brand?.campaignFor(word) ?: return say(word) { aiSpoke() }
+        val started = adEvent(AdEventType.AD_STARTED)
+        recordAd(started)
+        speakingAd = started
+        say(Phrases.adWord(campaign.disclosureText, word)) {
+            speakingAd = null
+            recordAd(adEvent(AdEventType.AD_WORD_COMPLETED))
+            aiSpoke()
+        }
+    }
+
+    /** "그게 뭐야?" — 승인된 짧은 소개만 읽고 같은 차례·같은 남은 시간으로 돌아간다(말하는 동안 시계는 멈춤). */
+    private fun explainAd() {
+        val s = game?.state ?: return
+        val word = s.lastAiWord ?: return
+        val campaign = s.brand?.campaignFor(word) ?: return
+        recordAd(adEvent(AdEventType.AD_EXPLANATION_REQUESTED))
+        say(Phrases.adExplanation(campaign.shortExplanation, word)) {
+            recordAd(adEvent(AdEventType.AD_EXPLANATION_COMPLETED))
+            aiSpoke()
+        }
+    }
+
+    /** "광고 꺼 줘". 이번 판은 유도만 멈추고, 다음 판부터는 일반 모드로 시작한다. */
+    private fun disableAds() {
+        val g = game ?: return
+        val s = g.state
+        if (s.brand?.adEnabled != true) return repeatPrompt(Phrases.NO_ADS)
+        g.disableAds()
+        recordAd(AdEvent(s.roundId, s.turn, s.lastAiAdCampaignId ?: "-", AdEventType.AD_DISABLED, System.currentTimeMillis()))
+        updateSave { copy(brandMode = false) }
+        persist()
+        repeatPrompt(Phrases.AD_OFF)
     }
 
     /** 안내를 한 뒤(없으면 바로) 지금 차례를 다시 알려 주고 듣는다. */
@@ -406,6 +483,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
     fun pause(byAudioFocus: Boolean) {
         val g = game ?: return
         if (g.isFinished || g.state.paused) return
+        speakingAd?.let { recordAd(it.copy(type = AdEventType.AD_INTERRUPTED, atEpochMs = System.currentTimeMillis())) }
+        speakingAd = null
         stopVoice()
         g.pause(now())
         pausedByAudioFocus = byAudioFocus

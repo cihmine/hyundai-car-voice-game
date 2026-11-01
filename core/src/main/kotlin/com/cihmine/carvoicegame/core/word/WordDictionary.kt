@@ -1,9 +1,14 @@
 package com.cihmine.carvoicegame.core.word
 
 import com.cihmine.carvoicegame.core.hangul.Hangul
+import kotlinx.serialization.Serializable
 
-/** [level] 1 쉬움 · 2 보통 · 3 어려움. [meaning] 은 힌트로 읽으므로 단어 자체를 포함하지 않는다. */
-data class WordEntry(val word: String, val level: Int, val meaning: String)
+/**
+ * [level] 1 쉬움 · 2 보통 · 3 어려움. [meaning] 은 힌트로 읽으므로 단어 자체를 포함하지 않는다.
+ * [isBrand] 는 브랜드 단어 허용 모드에서만 들어가는 광고 단어. AI 는 광고 계획을 거쳐서만 말한다.
+ */
+@Serializable
+data class WordEntry(val word: String, val level: Int, val meaning: String, val isBrand: Boolean = false)
 
 class WordDictionary(entries: Iterable<WordEntry>) {
     private val byWord: Map<String, WordEntry> = entries.associateBy { it.word }
@@ -16,6 +21,10 @@ class WordDictionary(entries: Iterable<WordEntry>) {
     val entries: Collection<WordEntry> get() = byWord.values
 
     fun lookup(word: String): WordEntry? = byWord[word]
+
+    /** [extra] 를 더한 사전. 같은 단어가 있으면 [extra] 쪽을 쓴다(브랜드 단어로 표시). */
+    fun plus(extra: Collection<WordEntry>): WordDictionary =
+        if (extra.isEmpty()) this else WordDictionary(byWord.values + extra)
 
     fun startingWith(chars: Set<Char>): List<WordEntry> = chars.flatMap { byFirstChar[it].orEmpty() }
 

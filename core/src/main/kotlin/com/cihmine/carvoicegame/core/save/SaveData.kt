@@ -4,6 +4,7 @@ import com.cihmine.carvoicegame.core.Difficulty
 import com.cihmine.carvoicegame.core.GameKind
 import com.cihmine.carvoicegame.core.Outcome
 import com.cihmine.carvoicegame.core.PointLedger
+import com.cihmine.carvoicegame.core.ad.AdEventLog
 import com.cihmine.carvoicegame.core.command.SpeechRate
 import com.cihmine.carvoicegame.core.command.VoiceCommand
 import com.cihmine.carvoicegame.core.question.QuestionGameState
@@ -26,6 +27,9 @@ data class SaveData(
     val personalCommands: Map<String, VoiceCommand> = emptyMap(),
     /** 끝난 판 기록(최근 순). 같은 판은 한 번만 남긴다. */
     val history: List<RoundRecord> = emptyList(),
+    /** 다음 끝말잇기를 브랜드 단어 허용 모드로 시작할지(사용자 선택, 기본은 일반 모드) */
+    val brandMode: Boolean = false,
+    val adLog: AdEventLog = AdEventLog(),
 ) {
     fun withRecord(record: RoundRecord): SaveData =
         if (history.any { it.roundId == record.roundId }) this
