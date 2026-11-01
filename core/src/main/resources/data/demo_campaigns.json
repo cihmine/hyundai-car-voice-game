@@ -5,8 +5,7 @@
     "status": "APPROVED",
     "word": "현대",
     "contentKind": "DEMO_BRAND",
-    "disclosureText": "브랜드 소개 데모 단어예요.",
-    "shortExplanation": "현대는 자동차 브랜드 이름으로도 쓰이는 말이에요. 이 앱의 시연용 예시이고 실제 광고 제휴는 아니에요.",
+    "shortExplanation": "현대는 지금 이 시대를 뜻하는 말이고, 자동차 회사 이름으로도 잘 알려져 있어요.",
     "validFrom": "2026-11-01",
     "validUntil": "2026-12-31"
   },
@@ -17,8 +16,7 @@
     "word": "그랜저",
     "aliases": ["그랜져"],
     "contentKind": "DEMO_BRAND",
-    "disclosureText": "브랜드 소개 데모 단어예요.",
-    "shortExplanation": "그랜저는 현대자동차의 승용차 차종 이름이에요. 이 앱의 시연용 예시이고 실제 광고 제휴는 아니에요.",
+    "shortExplanation": "그랜저는 현대자동차의 승용차 차종 이름이에요.",
     "validFrom": "2026-11-01",
     "validUntil": "2026-12-31"
   },
@@ -28,8 +26,7 @@
     "status": "APPROVED",
     "word": "아이오닉",
     "contentKind": "DEMO_BRAND",
-    "disclosureText": "브랜드 소개 데모 단어예요.",
-    "shortExplanation": "아이오닉은 현대자동차의 전기차 브랜드 이름이에요. 이 앱의 시연용 예시이고 실제 광고 제휴는 아니에요.",
+    "shortExplanation": "아이오닉은 현대자동차의 전기차 브랜드 이름이에요.",
     "validFrom": "2026-11-01",
     "validUntil": "2026-12-31"
   }

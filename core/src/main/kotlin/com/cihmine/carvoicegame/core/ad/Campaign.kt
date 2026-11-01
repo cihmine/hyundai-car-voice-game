@@ -29,8 +29,8 @@ data class Campaign(
     /** 승인된 다른 표기. 같은 단어로 보고 중복 검사한다. */
     val aliases: List<String> = emptyList(),
     val contentKind: ContentKind,
-    /** 광고 단어를 말하기 직전에 읽는 짧은 고지 */
-    val disclosureText: String,
+    /** 고지 문구(선택). 게임 중 음성으로는 읽지 않는다 — 단어는 끝말잇기 흐름 안에서 자연스럽게 나온다. */
+    val disclosureText: String = "",
     val shortExplanation: String,
     val longExplanation: String? = null,
     val evidenceUrl: String? = null,
@@ -80,7 +80,7 @@ class CampaignCatalog(val campaigns: List<Campaign>) {
             if (!c.isLive(nowEpochMs)) problems += CampaignProblem.NOT_LIVE
             val wordOk = c.word.length >= 2 && c.word.all(Hangul::isSyllable)
             if (!wordOk) problems += CampaignProblem.BAD_WORD
-            if (c.disclosureText.isBlank() || c.shortExplanation.isBlank()) problems += CampaignProblem.MISSING_TEXT
+            if (c.shortExplanation.isBlank()) problems += CampaignProblem.MISSING_TEXT
             val follow = if (wordOk) familiarFollowUps(dictionary, c.word, setOf(c.word)) else 0
             if (wordOk && follow < minFamiliarFollowUps) problems += CampaignProblem.FEW_FAMILIAR_FOLLOW_UPS
             CampaignCheck(c, follow, problems)

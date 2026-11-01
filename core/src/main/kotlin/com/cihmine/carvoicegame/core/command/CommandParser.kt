@@ -63,7 +63,8 @@ class CommandParser(private val personal: Map<String, VoiceCommand> = emptyMap()
             add(VoiceCommand.YES, "네", "예", "응", "좋아", "그래")
             add(VoiceCommand.NO, "아니", "아니요", "아니오", "싫어")
             add(VoiceCommand.MISHEARD, "잘못 들었어", "잘못 알아들었어", "그거 아니야", "그 말 아니야", "다시 들어 줘")
-            add(VoiceCommand.EXPLAIN_WORD, "뜻이 뭐야", "무슨 뜻이야", "그게 무슨 뜻이야", "뜻 알려 줘", "그게 뭐야", "뭐야 그게", "그게 뭔데", "무슨 차야")
+            add(VoiceCommand.EXPLAIN_WORD, "뜻이 뭐야", "무슨 뜻이야", "그게 무슨 뜻이야", "뜻 알려 줘", "그게 뭐야", "뭐야 그게", "그게 뭔데", "무슨 차야",
+                "그런 단어가 있어", "그런 단어도 있어", "그런 말이 있어", "그런 말도 있어", "그게 단어야", "처음 들어 봐", "그게 뭔데 그래")
             add(VoiceCommand.AD_OFF, "광고 꺼 줘", "광고 끄기", "광고 꺼", "광고 그만", "광고 없이 해 줘")
         }
     }

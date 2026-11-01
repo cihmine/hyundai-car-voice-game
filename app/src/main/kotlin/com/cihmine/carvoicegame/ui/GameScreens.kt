@@ -139,7 +139,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
                     label = { Text("브랜드 단어 허용(데모)", fontSize = 18.sp) },
                 )
             }
-            if (ui.save.brandMode) Text("시연용 브랜드 단어가 한 판에 최대 한 번 나올 수 있어요. 실제 광고 제휴가 아니며, 언제든 '광고 꺼 줘'로 끌 수 있어요.")
+            if (ui.save.brandMode) Text("끝말잇기 중에 자동차 이름 같은 단어가 한 판에 한 번쯤 자연스럽게 나올 수 있어요.")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = { c.start(kind, difficulty) }, Modifier.height(64.dp)) { Text("시작", fontSize = 22.sp) }
@@ -177,22 +177,10 @@ private fun PlayingScreen(ui: GameUi, c: GameController) {
                     (round.choseong?.let { " · 초성 $it" } ?: ""),
                 style = MaterialTheme.typography.titleLarge,
             )
-            round.brand?.let { brand ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (brand.adEnabled) "브랜드 단어 허용 모드(데모)" else "브랜드 단어 허용 모드 · 광고 꺼짐", color = MaterialTheme.colorScheme.secondary)
-                    if (brand.adEnabled) OutlinedButton(onClick = { c.press(VoiceCommand.AD_OFF) }) { Text("광고 끄기") }
-                }
-            }
             Text("제 단어", style = MaterialTheme.typography.titleMedium)
             // 규칙 안내를 묻는 동안에는 첫 단어를 아직 말하지 않았으므로 가린다.
             Text(if (ui.ask == Ask.RULES) "…" else round.lastAiWord ?: "", fontSize = 72.sp, fontWeight = FontWeight.Bold)
-            if (round.lastAiAdCampaignId != null) {
-                Text(
-                    "브랜드 소개 데모 · 실제 광고 아님",
-                    color = Color.Black,
-                    modifier = Modifier.background(Color(0xFFFFD54F), RoundedCornerShape(6.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-                )
-            }
+
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Text(timerText(ui), fontSize = 28.sp)
                 Text(micText(ui.mic, round.paused), fontSize = 28.sp)

@@ -242,6 +242,18 @@ class AdPlannerTest {
     }
 
     @Test
+    fun `낯선 단어를 되묻는 말은 설명 요청으로 알아듣는다`() {
+        val parser = com.cihmine.carvoicegame.core.command.CommandParser()
+        for (said in listOf("그게 뭐야?", "그런 단어가 있어?", "그런 말도 있어?", "무슨 차야?", "처음 들어 봐")) {
+            assertEquals(
+                com.cihmine.carvoicegame.core.command.ParsedUtterance.Command(com.cihmine.carvoicegame.core.command.VoiceCommand.EXPLAIN_WORD),
+                parser.parse(said),
+                said,
+            )
+        }
+    }
+
+    @Test
     fun `잘못 들었어로 광고 단어 차례를 되돌리면 광고 표시도 이전으로 돌아가지만 노출 사실은 남는다`() {
         val g = game("발표", used = listOf("발표"))
         g.submit(listOf("표현"), now = 0)

@@ -161,8 +161,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private fun speakOpening() {
         val s = game?.state ?: return
-        val opening = Phrases.opening(s.kind, s.difficulty, s.choseong, s.lastAiWord!!)
-        say(if (s.brand != null) "${Phrases.BRAND_MODE} $opening" else opening) { aiSpoke() }
+        say(Phrases.opening(s.kind, s.difficulty, s.choseong, s.lastAiWord!!)) { aiSpoke() }
     }
 
     // ── 말하기·듣기 ─────────────────────────────────────────
@@ -322,28 +321,27 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (event != null) updateSave { copy(adLog = adLog.record(event)) }
     }
 
-    /** AI 가 고른 광고 단어를 고지와 함께 읽는다. 빈도 제한은 재생 시작부터 소비한다. */
+    /** AI 가 고른 브랜드 단어를 다른 단어와 똑같이 읽는다(따로 안내하지 않음). 빈도 제한은 재생 시작부터 소비한다. */
     private fun sayAdWord() {
         val s = game?.state ?: return
         val word = s.lastAiWord ?: return
-        val campaign = s.brand?.campaignFor(word) ?: return say(word) { aiSpoke() }
         val started = adEvent(AdEventType.AD_STARTED)
         recordAd(started)
         speakingAd = started
-        say(Phrases.adWord(campaign.disclosureText, word)) {
+        say(word) {
             speakingAd = null
             recordAd(adEvent(AdEventType.AD_WORD_COMPLETED))
             aiSpoke()
         }
     }
 
-    /** "그게 뭐야?" — 승인된 짧은 소개만 읽고 같은 차례·같은 남은 시간으로 돌아간다(말하는 동안 시계는 멈춤). */
+    /** "그게 뭐야?", "그런 단어가 있어?" — 승인된 짧은 소개만 읽고 같은 차례·같은 남은 시간으로 돌아간다(말하는 동안 시계는 멈춤). */
     private fun explainAd() {
         val s = game?.state ?: return
         val word = s.lastAiWord ?: return
         val campaign = s.brand?.campaignFor(word) ?: return
         recordAd(adEvent(AdEventType.AD_EXPLANATION_REQUESTED))
-        say(Phrases.adExplanation(campaign.shortExplanation, word)) {
+        say(Phrases.brandExplanation(campaign.shortExplanation, word)) {
             recordAd(adEvent(AdEventType.AD_EXPLANATION_COMPLETED))
             aiSpoke()
         }
