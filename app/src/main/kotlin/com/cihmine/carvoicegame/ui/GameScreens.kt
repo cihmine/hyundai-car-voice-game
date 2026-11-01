@@ -81,6 +81,7 @@ private fun SimulationBanner(ui: GameUi) {
     val voice = buildList {
         add(if (ui.ttsReady) "음성 안내: ${ui.ttsEngine}" else "음성 안내 없음(화면 표시)")
         add(if (ui.micGranted && ui.sttAvailable) "음성 인식: ${ui.sttEngine}" else "음성 인식 없음 → 글자 입력 대체 시연")
+        add(if (ui.onlineDictionary) "단어 검색: 인터넷+앱 사전" else "단어 검색: 앱 사전만")
     }.joinToString(" · ")
     Row(
         Modifier.fillMaxWidth().background(Color(0xFF3A2E00)).padding(horizontal = 24.dp, vertical = 8.dp),

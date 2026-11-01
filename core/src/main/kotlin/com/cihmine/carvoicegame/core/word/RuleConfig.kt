@@ -17,6 +17,8 @@ data class RuleConfig(
     val easyHints: Int = 2,
     val normalHints: Int = 1,
     val hardHints: Int = 0,
+    /** 어려움 AI 가 한방 단어(사용자가 이을 단어가 없는 말)를 쓰기 시작하는 사용자 유효 답변 수 */
+    val hardHanbangAfterUserWords: Int = 5,
 ) {
     fun hintsFor(difficulty: Difficulty): Int = when (difficulty) {
         Difficulty.EASY -> easyHints

@@ -92,10 +92,10 @@ data class Decision(val chosen: WordEntry?, val summary: PlanSummary)
 
 /** 처음에는 학습 없이 편집된 난이도 태그로 사용자 답의 상대 가중치를 정한다(8.1). 측정한 확률이 아니다. */
 object ResponseModel {
-    fun weight(entry: WordEntry): Double = when (entry.level) {
-        1 -> 1.0
-        2 -> 0.5
-        else -> 0.25
+    fun weight(entry: WordEntry): Double = when (entry.familiarity) {
+        0 -> 1.0
+        1 -> 0.4
+        else -> 0.15
     }
 }
 
@@ -205,13 +205,14 @@ class AdPlanner(
         /** 기본 점수 G(a): 난이도에 맞는 수준일수록 높고, 상대가 이을 수 없는 한방 단어는 0 */
         fun gameplay(entry: WordEntry, used: Set<String>): Double {
             if (repliesAfter(entry.word, used + entry.word).isEmpty()) return 0.0
-            return levelScore(entry.level)
+            return familiarityScore(entry.familiarity)
         }
 
-        fun levelScore(level: Int): Double = when (input.difficulty) {
-            Difficulty.EASY -> when (level) { 1 -> 1.0; 2 -> 0.7; else -> 0.4 }
-            Difficulty.NORMAL -> when (level) { 2 -> 1.0; 1 -> 0.8; else -> 0.7 }
-            Difficulty.HARD -> when (level) { 1 -> 0.7; else -> 1.0 }
+        /** 일반 정책과 같은 기준: 익숙한 단어일수록 높다. 쉬움은 낯선 단어(2단계)를 쓰지 않으므로 0. */
+        fun familiarityScore(familiarity: Int): Double = when (familiarity) {
+            0 -> 1.0
+            1 -> 0.7
+            else -> if (input.difficulty == Difficulty.EASY) 0.0 else 0.4
         }
 
         /** 광고 단어를 지금(또는 [used] 상태에서) 말해도 되는지: 유효 캠페인·미사용·쉬운 후속 단어 수 */
@@ -252,8 +253,8 @@ class AdPlanner(
             val ads = live.filter { it.word.first() in heads && adEligible(it.word, used) }
             if (ads.isEmpty()) return false
             // 품질 조건: 그 상태의 최고 수준 일반 후보와 비교한다(한방 여부는 생략한 근사).
-            val bestLevel = repliesAfter(user.word, used).filter { !it.isBrand }.maxOfOrNull { levelScore(it.level) } ?: 0.0
-            return levelScore(1) >= bestLevel - config.qualityEpsilon
+            val best = repliesAfter(user.word, used).filter { !it.isBrand }.maxOfOrNull { familiarityScore(it.familiarity) } ?: 0.0
+            return ads.any { familiarityScore(it.toEntry().familiarity) >= best - config.qualityEpsilon }
         }
     }
 }

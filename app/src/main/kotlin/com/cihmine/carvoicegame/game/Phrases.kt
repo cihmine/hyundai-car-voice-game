@@ -56,6 +56,8 @@ object Phrases {
     fun userWins(word: String, points: Int) =
         "$word! 이어 갈 단어가 생각나지 않네요. 제가 졌어요." + if (points > 0) " ${points}포인트를 드릴게요." else ""
 
+    const val ASK_CONCEDE = "이을 단어가 없는 것 같아요. 이번 판은 제가 이긴 걸로 할까요?"
+    const val CONCEDED = "좋아요, 이번 판은 제가 이겼어요. 다음엔 그 글자를 조심하세요."
     const val VOIDED = "그만할게요. 이번 판은 무효로 하고 보상은 없어요."
     const val TIME_UP = "시간이 다 됐어요. 이번 판은 제가 이겼어요."
     const val GAVE_UP = "알겠어요. 이번 판은 제가 이겼어요."

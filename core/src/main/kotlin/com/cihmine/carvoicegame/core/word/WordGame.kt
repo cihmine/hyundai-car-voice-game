@@ -52,6 +52,10 @@ data class WordGameState(
     val lastAiAdCampaignId: String? = null,
     /** 직전 AI 단어 선택의 진단 정보(개발자 패널용) */
     val lastPlan: PlanSummary? = null,
+    /** 판 도중 인터넷 사전에서 찾아 더한 단어. 저장·복원 때 다시 넣는다. */
+    val learned: List<WordEntry> = emptyList(),
+    /** AI 의 직전 단어가 인터넷으로 확인한 한방 단어인지(어려움) */
+    val lastAiHanbang: Boolean = false,
 )
 
 /** 직전 판정을 되돌리기 위한 기록 */
@@ -64,6 +68,7 @@ data class LastTurn(
     val lastAiWordBefore: String?,
     val usedCountBefore: Int,
     val lastAiAdBefore: String? = null,
+    val lastAiHanbangBefore: Boolean = false,
 )
 
 enum class RejectReason(val message: String) {
@@ -126,8 +131,14 @@ class WordGame private constructor(
     var state: WordGameState = state
         private set
 
-    /** 브랜드 모드면 판을 시작할 때 고정한 브랜드 단어를 더한 사전. 사람과 AI 에 똑같이 쓴다. */
-    private val dictionary = baseDictionary.plus(state.brand?.entries.orEmpty())
+    /**
+     * 브랜드 모드면 판을 시작할 때 고정한 브랜드 단어를, 판 도중 인터넷에서 찾은 단어를 더한 사전.
+     * 사람과 AI 에 똑같이 쓴다.
+     */
+    private var dictionary = baseDictionary.plus(state.brand?.entries.orEmpty()).plus(state.learned)
+
+    /** 이번 AI 차례에 한방으로 써도 된다고 인터넷으로 확인한 단어. AI 가 한 번 고르면 비운다. */
+    private var verifiedDeadEnds: Set<String> = emptySet()
     private val aliases: Map<String, String> = state.brand?.aliases.orEmpty()
 
     private val picker = WordPicker(random)
@@ -149,7 +160,7 @@ class WordGame private constructor(
     fun submit(candidates: List<String>, now: Long, turn: Int? = null): TurnResult {
         if (!acceptingAnswer() || (turn != null && turn != state.turn)) return TurnResult.NotAccepting
         // 승인된 다른 표기는 정식 표기로 바꿔 같은 단어로 중복 검사한다.
-        val normalized = candidates.map(Words::normalize).filter { it.isNotEmpty() }.map { aliases[it] ?: it }.distinct()
+        val normalized = normalize(candidates)
 
         normalized.firstOrNull { violation(it) == null }?.let { return accept(it, now) }
 
@@ -189,6 +200,7 @@ class WordGame private constructor(
                 used = used.take(last.usedCountBefore),
                 lastAiWord = last.lastAiWordBefore,
                 lastAiAdCampaignId = last.lastAiAdBefore,
+                lastAiHanbang = last.lastAiHanbangBefore,
                 validUserWords = if (last.accepted) validUserWords - 1 else validUserWords,
                 clock = last.clockBefore,
                 phase = WordPhase.AWAIT_USER,
@@ -204,12 +216,13 @@ class WordGame private constructor(
         word = word, accepted = accepted, clockBefore = state.clock.pause(now),
         lastAiWordBefore = state.lastAiWord, usedCountBefore = state.used.size,
         lastAiAdBefore = state.lastAiAdCampaignId,
+        lastAiHanbangBefore = state.lastAiHanbang,
     )
 
     private fun accept(word: String, now: Long): TurnResult {
         val record = recordTurn(word, accepted = true, now)
         val used = state.used + word
-        val (aiEntry, plan) = chooseAiWord(used.toSet(), word)
+        val (aiEntry, plan, hanbang) = chooseAiWord(used.toSet(), word)
         if (aiEntry == null) {
             update {
                 copy(
@@ -227,6 +240,7 @@ class WordGame private constructor(
                 lastTurn = record, turn = turn + 1,
                 lastAiAdCampaignId = plan?.campaignId?.takeIf { plan.reason == DecisionReason.DIRECT_AD },
                 lastPlan = plan,
+                lastAiHanbang = hanbang,
                 brand = brand?.let { b ->
                     b.copy(
                         adShown = b.adShown || plan?.reason == DecisionReason.DIRECT_AD,
@@ -242,20 +256,88 @@ class WordGame private constructor(
      * AI 단어 선택. 일반 정책은 브랜드 단어를 고르지 않는다. 브랜드 모드면 광고 계획이 같은 합법 후보 안에서
      * 광고 단어(바로 노출)나 광고로 이어질 일반 단어(유도)를 고를 수 있다. 판정 규칙은 바꾸지 않는다.
      */
-    private fun chooseAiWord(used: Set<String>, userWord: String): Pair<WordEntry?, PlanSummary?> {
+    private fun chooseAiWord(used: Set<String>, userWord: String): AiChoice {
         val options = optionsAfter(userWord, used)
+        val verified = verifiedDeadEnds
+        verifiedDeadEnds = emptySet()
+        if (hanbangAllowed()) {
+            // 어려움: 인터넷으로도 이을 단어가 없다고 확인한 익숙한 한방 단어가 있으면 쓴다.
+            val hanbang = options.filter { it.word in verified && it.isFamiliar && !it.isBrand && isDeadEnd(it.word, used + it.word) }
+            if (hanbang.isNotEmpty()) return AiChoice(hanbang.random(random), null, hanbang = true)
+        }
         val baseline = picker.pick(
             options = options.filter { !it.isBrand },
             difficulty = state.difficulty,
             avoid = { isDeadEnd(it.word, used + it.word) },
+            userFollowUps = { familiarRepliesAfter(it.word, used + it.word) },
         )
         val brand = state.brand
-        if (planner == null || brand == null || state.kind != GameKind.WORD_CHAIN) return baseline to null
+        if (planner == null || brand == null || state.kind != GameKind.WORD_CHAIN) return AiChoice(baseline, null)
         val decision = planner.choose(
             PlanInput(dictionary, options, used, state.difficulty, state.validUserWords + 1, brand, baseline, random),
         )
-        return decision.chosen to decision.summary
+        return AiChoice(decision.chosen, decision.summary)
     }
+
+    private data class AiChoice(val entry: WordEntry?, val plan: PlanSummary?, val hanbang: Boolean = false)
+
+    /** 이번 AI 차례(방금 답을 인정한 뒤)에 한방 단어를 쓸 수 있는지: 어려움 끝말잇기, 사용자 답 N개 이후 */
+    private fun hanbangAllowed(): Boolean =
+        state.kind == GameKind.WORD_CHAIN && state.difficulty == Difficulty.HARD &&
+            state.validUserWords + 1 >= rules.hardHanbangAfterUserWords
+
+    // ── 인터넷 사전 보조 ────────────────────────────────────
+    // 앱이 판정 직전에 필요한 검색을 끝내고 결과를 넣는다. 엔진 판정은 그 뒤 동기·결정적으로 한다.
+
+    /** 인터넷 사전에서 찾은 단어를 이번 판 사전에 더한다. 이미 있는 단어는 건너뛴다. */
+    fun learn(entries: List<WordEntry>) {
+        val fresh = entries
+            .filter { it.word.length >= 2 && it.word.all(Hangul::isSyllable) && dictionary.lookup(it.word) == null }
+            .distinctBy { it.word }
+            .map { it.copy(isBrand = false, core = false) }
+        if (fresh.isEmpty()) return
+        dictionary = dictionary.plus(fresh)
+        update { copy(learned = learned + fresh) }
+    }
+
+    /** STT 후보 중 지금 바로 인정될 단어(판정은 하지 않는다) */
+    fun acceptableWord(candidates: List<String>): String? = normalize(candidates).firstOrNull { violation(it) == null }
+
+    /** 규칙(시작 글자·길이·중복)은 맞지만 앱 사전에 없어 인터넷으로 확인할 만한 말. 인정될 후보가 이미 있으면 null */
+    fun wordToLookUp(candidates: List<String>): String? {
+        if (!acceptingAnswer()) return null
+        val normalized = normalize(candidates)
+        if (normalized.any { violation(it) == null }) return null
+        return normalized.firstOrNull { dictionary.lookup(it) == null && violation(it, checkDictionary = false) == null }
+    }
+
+    /** [userWord] 를 인정한 뒤 AI 가 앱 사전으로 이을 단어가 없으면 인터넷에서 찾아볼 첫 글자들(어려움만) */
+    fun aiSearchHeads(userWord: String): Set<Char>? {
+        if (state.kind != GameKind.WORD_CHAIN || state.difficulty != Difficulty.HARD) return null
+        val options = optionsAfter(userWord, state.used.toSet() + userWord).filter { !it.isBrand }
+        return if (options.isEmpty()) Hangul.startCharsAfter(userWord.last()) else null
+    }
+
+    /**
+     * [userWord] 를 인정한 뒤 AI 가 한방으로 쓸 만한 익숙한 후보(앱 사전 기준 이을 단어 없음).
+     * 앱이 인터넷으로 정말 없는지 확인해 [setVerifiedDeadEnds] 로 넘긴다. 확인 못 한(오프라인) 후보는 쓰지 않는다.
+     */
+    fun hanbangCandidates(userWord: String, limit: Int = 3): List<String> {
+        if (!hanbangAllowed()) return emptyList()
+        val used = state.used.toSet() + userWord
+        return optionsAfter(userWord, used)
+            .filter { it.isFamiliar && !it.isBrand && isDeadEnd(it.word, used + it.word) }
+            .sortedBy { it.word } // 검색 결과와 무관하게 같은 순서
+            .take(limit)
+            .map { it.word }
+    }
+
+    fun setVerifiedDeadEnds(words: Set<String>) {
+        verifiedDeadEnds = words
+    }
+
+    private fun normalize(candidates: List<String>): List<String> =
+        candidates.map(Words::normalize).filter { it.isNotEmpty() }.map { aliases[it] ?: it }.distinct()
 
     /** "광고 꺼 줘". 바로 유도를 멈춘다. 이번 판의 허용 단어 목록과 포인트 규칙은 그대로다. */
     fun disableAds() {
@@ -263,8 +345,8 @@ class WordGame private constructor(
         update { copy(brand = brand.copy(adEnabled = false)) }
     }
 
-    private fun violation(word: String): RejectReason? {
-        if (dictionary.lookup(word) == null) return RejectReason.NOT_IN_DICTIONARY
+    private fun violation(word: String, checkDictionary: Boolean = true): RejectReason? {
+        if (checkDictionary && dictionary.lookup(word) == null) return RejectReason.NOT_IN_DICTIONARY
         if (word in state.used) return RejectReason.ALREADY_USED
         return when (state.kind) {
             GameKind.WORD_CHAIN -> when {
@@ -289,6 +371,10 @@ class WordGame private constructor(
         else -> emptyList()
     }.filter { it.word !in used }
 
+    /** [word] 뒤에 사용자가 이을 수 있는 익숙한 단어 수(AI 의 끝 글자 전략에 쓴다) */
+    private fun familiarRepliesAfter(word: String, used: Set<String>): Int =
+        if (state.kind == GameKind.WORD_CHAIN) optionsAfter(word, used).count { it.isFamiliar } else 0
+
     /** 끝말잇기에서 상대가 이을 단어가 없는 한방 단어인지 */
     private fun isDeadEnd(word: String, used: Set<String>): Boolean =
         state.kind == GameKind.WORD_CHAIN && optionsAfter(word, used).isEmpty()
@@ -301,7 +387,7 @@ class WordGame private constructor(
         if (state.hintsLeft <= 0) return HintResult.NoHintsLeft
         // 힌트로 광고 소개가 나가지 않도록 브랜드 단어는 고르지 않는다.
         val target = optionsAfter(state.lastAiWord ?: return HintResult.NoCandidate, state.used.toSet())
-            .filter { !it.isBrand }.minByOrNull { it.level } ?: return HintResult.NoCandidate
+            .filter { !it.isBrand }.minByOrNull { it.familiarity } ?: return HintResult.NoCandidate
         update {
             copy(
                 hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER,
@@ -421,7 +507,8 @@ class WordGame private constructor(
                 ),
                 dictionary, random, rules, planner,
             )
-            val first = picker.pick(firstOptions, difficulty, avoid = { game.isDeadEnd(it.word, setOf(it.word)) })
+            // 첫 단어는 난이도와 관계없이 익숙한 단어 중 무작위(전략은 사용자 답부터)
+            val first = picker.pick(firstOptions, Difficulty.NORMAL, avoid = { game.isDeadEnd(it.word, setOf(it.word)) })
                 ?: error("첫 단어를 고를 수 없음 — 사전 확인 필요")
             game.update { copy(used = listOf(first.word), lastAiWord = first.word) }
             return game

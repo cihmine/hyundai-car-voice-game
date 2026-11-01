@@ -18,6 +18,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+        // 단어 검색 중계 서버(server/). 비워 두면 인터넷 검색 없이 앱 안 사전만 쓴다.
+        val dictProxy = providers.gradleProperty("carvoicegame.dictProxy").getOrElse("")
+        buildConfigField("String", "DICT_PROXY_URL", "\"$dictProxy\"")
     }
 
     signingConfigs {

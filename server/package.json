@@ -1,0 +1,9 @@
+{
+  "name": "carvoicegame-dict",
+  "private": true,
+  "type": "module",
+  "description": "말게임 우리말샘 검색 중계(Vercel 함수). 키는 환경 변수 OPENDICT_KEY 에만 둔다.",
+  "engines": {
+    "node": ">=20"
+  }
+}

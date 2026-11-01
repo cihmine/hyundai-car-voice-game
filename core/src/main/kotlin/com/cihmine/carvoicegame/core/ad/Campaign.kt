@@ -103,7 +103,7 @@ class CampaignCatalog(val campaigns: List<Campaign>) {
     }
 }
 
-/** [word] 다음에 이을 수 있는 쉬운(1단계) 일반 단어 수. 브랜드 단어와 이미 쓴 단어는 세지 않는다. */
+/** [word] 다음에 이을 수 있는 익숙한 일반 단어 수. 브랜드 단어와 이미 쓴 단어는 세지 않는다. */
 internal fun familiarFollowUps(dictionary: WordDictionary, word: String, used: Set<String>): Int =
     dictionary.startingWith(Hangul.startCharsAfter(word.last()))
-        .count { it.level == 1 && !it.isBrand && it.word.length >= 2 && it.word !in used }
+        .count { it.isFamiliar && !it.isBrand && it.word.length >= 2 && it.word !in used }

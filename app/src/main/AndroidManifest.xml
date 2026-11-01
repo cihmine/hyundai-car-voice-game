@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 앱 사전에 없는 단어를 단어 검색 중계 서버로 확인(없으면 앱 안 사전만 사용) -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Pleos 음성 인식·안내 SDK -->
     <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />

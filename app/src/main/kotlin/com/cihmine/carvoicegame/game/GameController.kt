@@ -18,6 +18,8 @@ import com.cihmine.carvoicegame.core.command.CommandParser
 import com.cihmine.carvoicegame.core.command.ParsedUtterance
 import com.cihmine.carvoicegame.core.command.SpeechRate
 import com.cihmine.carvoicegame.core.command.VoiceCommand
+import com.cihmine.carvoicegame.core.hangul.Hangul
+import com.cihmine.carvoicegame.core.PlayMode
 import com.cihmine.carvoicegame.core.port.SpeechError
 import com.cihmine.carvoicegame.core.port.SpeechInput
 import com.cihmine.carvoicegame.core.save.RoundRecord
@@ -33,11 +35,15 @@ import com.cihmine.carvoicegame.core.word.WordGame
 import com.cihmine.carvoicegame.core.word.WordGameState
 import com.cihmine.carvoicegame.core.word.WordPhase
 import com.cihmine.carvoicegame.data.FileSaveStore
+import com.cihmine.carvoicegame.data.OnlineDictionary
 import com.cihmine.carvoicegame.speech.Voice
 import com.cihmine.carvoicegame.speech.AudioFocus
 import com.cihmine.carvoicegame.vehicle.MockVehicleStatus
 import com.cihmine.carvoicegame.vehicle.VehicleState
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -50,7 +56,7 @@ enum class Screen { HOME, PLAYING, RESULT, LOCKER }
 enum class Mic { OFF, SPEAKING, LISTENING }
 
 /** 예/아니요로 답을 기다리는 질문 */
-enum class Ask { NONE, RULES, HINT, QUIT, RESUME }
+enum class Ask { NONE, RULES, HINT, QUIT, RESUME, CONCEDE }
 
 data class LogLine(val fromUser: Boolean, val text: String)
 
@@ -70,6 +76,8 @@ data class GameUi(
     val sttEngine: String = "",
     val micGranted: Boolean = false,
     val notice: String? = null,
+    /** 단어 검색 중계 서버 주소가 설정돼 있는지(실제 연결 여부는 요청 때 판단) */
+    val onlineDictionary: Boolean = false,
 )
 
 /**
@@ -86,6 +94,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private val dictionary = WordDictionary.loadSample()
     private val catalog = CampaignCatalog.loadDemo()
     private val planner = AdPlanner()
+    private val online = OnlineDictionary.fromBuildConfig()
     private val store = FileSaveStore(app.filesDir)
     val vehicle = MockVehicleStatus()
 
@@ -105,11 +114,18 @@ class GameController(app: Application) : AndroidViewModel(app) {
     /** 지금 읽고 있는 광고 단어(중단 기록용) */
     private var speakingAd: AdEvent? = null
 
+    /** 판정 전 인터넷 검색 중. 그동안 들어온 말·버튼은 무시한다. */
+    private var busy = false
+
+    /** AI 가 마지막 단어를 다 말한 시각과 그 차례(주행 중 한방에 막혔는지 판단) */
+    private var aiSpokeAt: Long = 0
+    private var concedeOfferedTurn = -1
+
     private val save get() = _ui.value.save
     private val parser get() = CommandParser(save.personalCommands)
 
     init {
-        _ui.update { it.copy(sttEngine = stt.engineName, ttsEngine = tts.engineName) }
+        _ui.update { it.copy(sttEngine = stt.engineName, ttsEngine = tts.engineName, onlineDictionary = online != null) }
         viewModelScope.launch {
             vehicle.state.collect { state ->
                 _ui.update { it.copy(vehicle = state) }
@@ -180,6 +196,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private fun aiSpoke() {
         val g = game ?: return
         g.speechFinished(now())
+        aiSpokeAt = now()
         publish()
         listen()
     }
@@ -213,7 +230,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     /** 화면 버튼. 음성 명령과 같은 처리를 한다. */
     fun press(command: VoiceCommand) {
         val g = game ?: return
-        if (g.isFinished || g.state.paused) return
+        if (g.isFinished || g.state.paused || busy) return
         stt.cancel()
         listenToken++
         command(command)
@@ -230,7 +247,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     /** 시연 패널 글자 입력. 음성 인식 결과와 같은 길로 처리한다. */
     fun typed(text: String) {
-        if (text.isBlank()) return
+        if (text.isBlank() || busy) return
         stt.cancel()
         listenToken++
         onUtterance(listOf(text), game?.state?.turn)
@@ -239,6 +256,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private fun onUtterance(candidates: List<String>, turn: Int?) {
         DebugLog.d(TAG) { "heard: $candidates ask=${_ui.value.ask}" }
         val g = game ?: return
+        if (busy) return
         val top = candidates.first()
         log(true, top)
         val parsed = parser.parse(top) { dictionary.lookup(it) != null && _ui.value.ask == Ask.NONE }
@@ -256,7 +274,52 @@ class GameController(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 판정 전에 인터넷 사전으로 보조한다(서버가 설정돼 있을 때만, 최대 3초).
+     * - 앱 사전에 없는 사용자 말 → 정말 있는 명사면 이번 판 사전에 더해 인정한다.
+     * - 어려움: AI 가 앱 사전으로 막히면 이을 단어를 찾아오고, 한방 후보는 정말 이을 단어가 없는지 확인한다.
+     * 검색하는 동안 사용자 시계는 멈춘다. 실패하면 앱 사전만으로 판정한다.
+     */
     private fun judge(candidates: List<String>, turn: Int?) {
+        val g = game ?: return
+        val dict = online
+        val userWord = g.acceptableWord(candidates)
+        val toLookUp = g.wordToLookUp(candidates)
+        val word = userWord ?: toLookUp
+        val needsHelp = word != null && (toLookUp != null || g.aiSearchHeads(word) != null || g.hanbangCandidates(word).isNotEmpty())
+        if (dict == null || !needsHelp) return judgeNow(candidates, turn)
+
+        busy = true
+        g.speechStarted(now()) // 검색하는 동안 사용자 시간을 멈춘다
+        _ui.update { it.copy(notice = "단어를 찾아보는 중…") }
+        viewModelScope.launch {
+            withTimeoutOrNull(3_000) {
+                if (toLookUp != null) dict.exact(toLookUp)?.let { g.learn(it.entries) }
+                val accepted = g.acceptableWord(candidates) ?: return@withTimeoutOrNull
+                g.aiSearchHeads(accepted)?.forEach { head -> dict.startingWith(head)?.let { g.learn(it.entries) } }
+                // 한방 후보: 끝 글자(두음 변형 포함)로 시작하는 단어가 인터넷에도 하나도 없을 때만 쓴다.
+                val verified = g.hanbangCandidates(accepted).map { candidate ->
+                    async {
+                        val results = Hangul.startCharsAfter(candidate.last()).map { dict.startingWith(it) }
+                        when {
+                            results.any { it == null } -> null // 확인 실패(오프라인)면 쓰지 않는다
+                            results.all { it!!.anyWords == 0 } -> candidate
+                            else -> {
+                                results.forEach { g.learn(it!!.entries) }
+                                null
+                            }
+                        }
+                    }
+                }.awaitAll().filterNotNull().toSet()
+                g.setVerifiedDeadEnds(verified)
+            }
+            busy = false
+            _ui.update { it.copy(notice = null) }
+            judgeNow(candidates, turn)
+        }
+    }
+
+    private fun judgeNow(candidates: List<String>, turn: Int?) {
         val g = game ?: return
         when (val r = g.submit(candidates, now(), turn)) {
             is TurnResult.Accepted -> {
@@ -419,6 +482,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         DebugLog.d(TAG) { "answer $ask <- $parsed" }
         val command = (parsed as? ParsedUtterance.Command)?.command
         val yes = command == VoiceCommand.YES || (ask == Ask.RESUME && command == VoiceCommand.RESUME) ||
+            (ask == Ask.CONCEDE && command == VoiceCommand.GIVE_UP) ||
             (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT)
         val no = command == VoiceCommand.NO
         if (!yes && !no) return say(Phrases.YES_OR_NO) { listenForAnswer() }
@@ -432,6 +496,12 @@ class GameController(app: Application) : AndroidViewModel(app) {
             }
             Ask.QUIT -> if (yes) voidRound() else repeatPrompt(Phrases.KEEP_GOING)
             Ask.RESUME -> if (yes) resume() else _ui.update { it.copy(mic = Mic.OFF) }
+            Ask.CONCEDE -> if (yes) {
+                g.giveUp(now())
+                finishRound(Phrases.CONCEDED)
+            } else {
+                repeatPrompt(Phrases.KEEP_GOING)
+            }
             Ask.NONE -> Unit
         }
     }
@@ -444,7 +514,15 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 persist()
                 say("힌트예요. ${h.meaning}. 남은 힌트는 ${h.hintsLeft}번이에요.") { aiSpoke() }
             }
-            HintResult.NoHintsLeft, HintResult.NoCandidate -> if (timedOut) {
+            HintResult.NoCandidate -> if (g.state.lastAiHanbang && !timedOut) {
+                offerConcede()
+            } else if (timedOut) {
+                g.declineHint(now())
+                finishRound(Phrases.TIME_UP)
+            } else {
+                repeatPrompt("이번 판은 힌트를 더 드릴 수 없어요.")
+            }
+            HintResult.NoHintsLeft -> if (timedOut) {
                 g.declineHint(now())
                 finishRound(Phrases.TIME_UP)
             } else {
@@ -470,10 +548,25 @@ class GameController(app: Application) : AndroidViewModel(app) {
                         ask(Ask.HINT, Phrases.OFFER_HINT)
                     }
                     TickResult.TimeUp -> finishRound(Phrases.TIME_UP)
-                    TickResult.None -> Unit
+                    TickResult.None -> if (stuckOnHanbang(g)) offerConcede()
                 }
             }
         }
+    }
+
+    /**
+     * 주행 중에는 제한시간이 없어 한방 단어에 막히면 끝나지 않는다.
+     * AI 가 한방 단어를 말하고 30초가 지나도록 답이 없으면 한 번 물어본다.
+     */
+    private fun stuckOnHanbang(g: WordGame): Boolean =
+        g.state.lastAiHanbang && g.state.mode == PlayMode.DRIVING && !g.state.paused && !busy &&
+            _ui.value.ask == Ask.NONE && _ui.value.mic == Mic.LISTENING &&
+            concedeOfferedTurn != g.state.turn && now() - aiSpokeAt > 30_000
+
+    private fun offerConcede() {
+        val g = game ?: return
+        concedeOfferedTurn = g.state.turn
+        ask(Ask.CONCEDE, Phrases.ASK_CONCEDE)
     }
 
     // ── 일시정지·차량 상태 ─────────────────────────────────

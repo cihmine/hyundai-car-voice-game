@@ -6,9 +6,24 @@ import kotlinx.serialization.Serializable
 /**
  * [level] 1 쉬움 · 2 보통 · 3 어려움. [meaning] 은 힌트로 읽으므로 단어 자체를 포함하지 않는다.
  * [isBrand] 는 브랜드 단어 허용 모드에서만 들어가는 광고 단어. AI 는 광고 계획을 거쳐서만 말한다.
+ * [core] 는 직접 고른 일상 단어(우리말샘에서 받은 단어는 false).
  */
 @Serializable
-data class WordEntry(val word: String, val level: Int, val meaning: String, val isBrand: Boolean = false)
+data class WordEntry(
+    val word: String,
+    val level: Int,
+    val meaning: String,
+    val isBrand: Boolean = false,
+    val core: Boolean = true,
+) {
+    /**
+     * 익숙함 단계. 0 직접 고른 일상 단어 · 1 우리말샘 인기 상위 · 2 나머지.
+     * AI 는 난이도와 관계없이 익숙한 단어부터 말한다 — 난이도는 단어가 아니라 AI 의 수(끝 글자 선택)로 정한다.
+     */
+    val familiarity: Int get() = if (core) 0 else if (level == 1) 1 else 2
+
+    val isFamiliar: Boolean get() = familiarity <= 1
+}
 
 class WordDictionary(entries: Iterable<WordEntry>) {
     private val byWord: Map<String, WordEntry> = entries.associateBy { it.word }
@@ -36,14 +51,14 @@ class WordDictionary(entries: Iterable<WordEntry>) {
         .keys.sorted()
 
     companion object {
-        /** 한 줄에 `단어<TAB>난이도<TAB>뜻`. `#` 로 시작하는 줄은 주석 */
-        fun parseTsv(text: String): WordDictionary = WordDictionary(
+        /** 한 줄에 `단어<TAB>난이도<TAB>뜻`. `#` 로 시작하는 줄은 주석. [core] 는 직접 고른 단어 파일인지 */
+        fun parseTsv(text: String, core: Boolean = true): WordDictionary = WordDictionary(
             text.lineSequence()
                 .map { it.trim() }
                 .filter { it.isNotEmpty() && !it.startsWith("#") }
                 .map { line ->
                     val (word, level, meaning) = line.split('\t', limit = 3)
-                    WordEntry(word.trim(), level.trim().toInt(), meaning.trim())
+                    WordEntry(word.trim(), level.trim().toInt(), meaning.trim(), core = core)
                 }
                 .toList(),
         )
@@ -57,8 +72,10 @@ class WordDictionary(entries: Iterable<WordEntry>) {
             "/data/words_more_3.tsv", "/data/words_opendict.tsv",
         )
 
+        private const val OPENDICT_FILE = "/data/words_opendict.tsv"
+
         fun loadSample(): WordDictionary =
-            WordDictionary(BUNDLED_FILES.flatMap { parseTsv(readResource(it)).entries })
+            WordDictionary(BUNDLED_FILES.flatMap { parseTsv(readResource(it), core = it != OPENDICT_FILE).entries })
     }
 }
 

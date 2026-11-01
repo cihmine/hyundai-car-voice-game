@@ -114,13 +114,37 @@ async function search(key, syllable) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function main() {
-  const key = readKey();
-  const handWritten = new Set(HAND_WRITTEN.flatMap(readTsvWords));
-  const syllables = syllablesToQuery([...handWritten]);
-  console.log(`시작 음절 ${syllables.length}개 조회`);
+// 차 안에서 가족이 하는 게임이므로 비속어·남을 낮잡는 말·성적인 말은 넣지 않는다.
+const BAD_WORD_PARTS = ["좆", "씹", "병신", "지랄", "개새", "창녀", "니미", "불알", "보지", "자지"];
+const BAD_MEANING_PARTS = ["낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란"];
+const isUnsuitable = (word, meaning) =>
+  BAD_WORD_PARTS.some((p) => word.includes(p)) || BAD_MEANING_PARTS.some((p) => meaning.includes(p));
 
+/** 끝 글자(두음 변형 포함)로 시작하는 단어가 하나도 없는 글자들 */
+function deadEndChars(words) {
+  const starts = new Set(words.map((w) => w[0]));
+  const missing = new Set();
+  for (const w of words) {
+    const c = w[w.length - 1];
+    if (!isSyllable(c)) continue;
+    const heads = [c, dueum(c)].filter(Boolean);
+    if (!heads.some((h) => starts.has(h))) heads.forEach((h) => missing.add(h));
+  }
+  return [...missing].sort();
+}
+
+function readExisting() {
   const out = new Map();
+  if (!existsSync(OUT)) return out;
+  for (const line of readFileSync(OUT, "utf8").split(/\r?\n/)) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const [word, level, meaning] = line.split("\t");
+    out.set(word, { level: Number(level), meaning });
+  }
+  return out;
+}
+
+async function harvest(key, syllables, handWritten, out, label) {
   let calls = 0;
   for (const s of syllables) {
     let items;
@@ -142,15 +166,44 @@ async function main() {
       const noun = senses.find((x) => x.pos === "명사" && x.definition);
       if (!noun) continue;
       const meaning = shortMeaning(noun.definition);
-      if (!meaning || meaning.includes(word)) continue;
+      if (!meaning || meaning.includes(word) || isUnsuitable(word, meaning)) continue;
       const level = rank < 15 ? 1 : rank < 35 ? 2 : 3;
       out.set(word, { level, meaning });
       rank++;
     }
-    process.stdout.write(`\r${calls}/${syllables.length} 음절, ${out.size}단어`);
+    if (calls % 20 === 0) console.log(`${label} ${calls}/${syllables.length} 음절, 누적 ${out.size}단어`);
     await sleep(DELAY_MS);
   }
-  console.log();
+  return calls;
+}
+
+// 사용: node tools/fetch-opendict.mjs [--fill]
+//   --fill: 기존 결과를 두고, 이을 단어가 없는 끝 글자만 조회해 채운다(최대 FILL_ROUNDS 바퀴).
+const FILL_ROUNDS = 3;
+
+async function main() {
+  const key = readKey();
+  const handWritten = new Set(HAND_WRITTEN.flatMap(readTsvWords));
+  const fill = process.argv.includes("--fill");
+  const out = fill ? readExisting() : new Map();
+  for (const [w, { meaning }] of out) if (isUnsuitable(w, meaning)) out.delete(w);
+
+  let calls = 0;
+  if (fill) {
+    const queried = new Set(syllablesToQuery([...handWritten]));
+    for (let round = 1; round <= FILL_ROUNDS; round++) {
+      const targets = deadEndChars([...handWritten, ...out.keys()]).filter((c) => !queried.has(c));
+      console.log(`채우기 ${round}바퀴: 이을 단어 없는 글자 ${targets.length}개 조회`);
+      if (targets.length === 0) break;
+      targets.forEach((c) => queried.add(c));
+      calls += await harvest(key, targets, handWritten, out, `채우기 ${round}`);
+    }
+    console.log(`남은 막힌 글자 ${deadEndChars([...handWritten, ...out.keys()]).length}개`);
+  } else {
+    const syllables = syllablesToQuery([...handWritten]);
+    console.log(`시작 음절 ${syllables.length}개 조회`);
+    calls = await harvest(key, syllables, handWritten, out, "조회");
+  }
 
   const header = [
     "# 출처: 국립국어원 우리말샘(https://opendict.korean.go.kr), CC BY-SA 2.0 KR — 이 파일은 같은 라이선스로 배포한다.",
