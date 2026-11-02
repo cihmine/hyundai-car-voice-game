@@ -145,8 +145,9 @@ class AdPlanner(
         val scored = input.options.map { it to ctx.gameplay(it, input.used) }
         val maxG = scored.maxOfOrNull { it.second } ?: return normal("후보 없음")
         // 광고 단어도 일반 품질 제한을 통과해야 하고, 지금 노출 조건을 채울 때만 후보에 넣는다.
+        // 점수 0(한방·쉬움의 비일상 단어)인 일반 단어는 유도 후보로도 쓰지 않는다 — 일반 정책이 내지 않는 단어를 광고 때문에 내지 않게.
         val near = scored.filter { (e, g) ->
-            g >= maxG - config.qualityEpsilon && (!e.isBrand || (directOk && ctx.adEligible(e.word, input.used)))
+            g >= maxG - config.qualityEpsilon && (if (e.isBrand) directOk && ctx.adEligible(e.word, input.used) else g > 0.0)
         }
         if (near.isEmpty()) return normal("품질 조건을 통과한 후보 없음")
 
@@ -208,11 +209,12 @@ class AdPlanner(
             return familiarityScore(entry.familiarity)
         }
 
-        /** 일반 정책과 같은 기준: 익숙한 단어일수록 높다. 쉬움은 낯선 단어(2단계)를 쓰지 않으므로 0. */
-        fun familiarityScore(familiarity: Int): Double = when (familiarity) {
-            0 -> 1.0
-            1 -> 0.7
-            else -> if (input.difficulty == Difficulty.EASY) 0.0 else 0.4
+        /** 일반 정책과 같은 기준: 익숙한 단어일수록 높다. 쉬움은 일상 단어(0단계)만 쓰므로 나머지는 0. */
+        fun familiarityScore(familiarity: Int): Double = when {
+            familiarity == 0 -> 1.0
+            input.difficulty == Difficulty.EASY -> 0.0
+            familiarity == 1 -> 0.7
+            else -> 0.4
         }
 
         /** 광고 단어를 지금(또는 [used] 상태에서) 말해도 되는지: 유효 캠페인·미사용·쉬운 후속 단어 수 */

@@ -74,8 +74,21 @@ class WordDictionary(entries: Iterable<WordEntry>) {
 
         private const val OPENDICT_FILE = "/data/words_opendict.tsv"
 
-        fun loadSample(): WordDictionary =
-            WordDictionary(BUNDLED_FILES.flatMap { parseTsv(readResource(it), core = it != OPENDICT_FILE).entries })
+        /** 우리말샘 단어 중 직접 고른 일상 단어. 직접 쓴 단어와 같은 0단계(core)로 다룬다. */
+        const val EVERYDAY_FILE = "/data/everyday_opendict.txt"
+
+        fun everydayWords(): Set<String> = readResource(EVERYDAY_FILE).lineSequence()
+            .map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toSet()
+
+        fun loadSample(): WordDictionary {
+            val everyday = everydayWords()
+            return WordDictionary(
+                BUNDLED_FILES.flatMap { file ->
+                    parseTsv(readResource(file), core = file != OPENDICT_FILE).entries
+                        .map { if (!it.core && it.word in everyday) it.copy(core = true) else it }
+                },
+            )
+        }
     }
 }
 

@@ -272,7 +272,7 @@ class WordGame private constructor(
             options = options.filter { !it.isBrand },
             difficulty = state.difficulty,
             avoid = { isDeadEnd(it.word, used + it.word) },
-            userFollowUps = { familiarRepliesAfter(it.word, used + it.word) },
+            userFollowUps = { repliesFor(it.word, used + it.word) },
         )
         val brand = state.brand
         if (planner == null || brand == null || state.kind != GameKind.WORD_CHAIN) return AiChoice(baseline, null)
@@ -374,9 +374,15 @@ class WordGame private constructor(
         else -> emptyList()
     }.filter { it.word !in used }
 
-    /** [word] 뒤에 사용자가 이을 수 있는 익숙한 단어 수(AI 의 끝 글자 전략에 쓴다) */
-    private fun familiarRepliesAfter(word: String, used: Set<String>): Int =
-        if (state.kind == GameKind.WORD_CHAIN) optionsAfter(word, used).count { it.isFamiliar } else 0
+    /**
+     * [word] 뒤에 사용자가 이을 수 있는 단어 수(AI 의 끝 글자 전략에 쓴다).
+     * 쉬움은 누구나 아는 일상 단어(0단계)만, 그 밖에는 익숙한 단어(0·1단계)를 센다.
+     */
+    private fun repliesFor(word: String, used: Set<String>): Int {
+        if (state.kind != GameKind.WORD_CHAIN) return 0
+        val maxFamiliarity = if (state.difficulty == Difficulty.EASY) 0 else 1
+        return optionsAfter(word, used).count { it.familiarity <= maxFamiliarity }
+    }
 
     /** 끝말잇기에서 상대가 이을 단어가 없는 한방 단어인지 */
     private fun isDeadEnd(word: String, used: Set<String>): Boolean =
@@ -497,7 +503,14 @@ class WordGame private constructor(
             require(brand == null || kind == GameKind.WORD_CHAIN) { "브랜드 단어 모드는 끝말잇기만" }
             val picker = WordPicker(random)
             val choseong = if (kind == GameKind.CHOSEONG) {
-                dictionary.choseongPairs(MIN_CHOSEONG_POOL).randomOrNull(random)
+                val pairs = dictionary.choseongPairs(MIN_CHOSEONG_POOL)
+                // 쉬움 AI 는 일상 단어만 쓰므로 일상 두 글자 단어가 충분한 초성을 낸다.
+                val easyPairs = if (difficulty == Difficulty.EASY) {
+                    pairs.filter { p -> dictionary.withChoseong(p).count { it.familiarity == 0 && it.word.length == 2 } >= MIN_CHOSEONG_POOL }
+                } else {
+                    pairs
+                }
+                easyPairs.ifEmpty { pairs }.randomOrNull(random)
                     ?: error("출제할 초성이 없음 — 사전 확인 필요")
             } else {
                 null
@@ -513,9 +526,13 @@ class WordGame private constructor(
                 ),
                 dictionary, random, rules, planner,
             )
-            // 첫 단어는 난이도와 관계없이 익숙한 단어 중 무작위(전략은 사용자 답부터)
-            val first = picker.pick(firstOptions, Difficulty.NORMAL, avoid = { game.isDeadEnd(it.word, setOf(it.word)) })
-                ?: error("첫 단어를 고를 수 없음 — 사전 확인 필요")
+            // 첫 단어는 익숙한 단어 중 무작위. 쉬움은 첫 단어부터 일상 단어로 잇기 쉬운 끝 글자로 배려한다(어려움 압박은 사용자 답부터).
+            val firstPolicy = if (difficulty == Difficulty.EASY) Difficulty.EASY else Difficulty.NORMAL
+            val first = picker.pick(
+                firstOptions, firstPolicy,
+                avoid = { game.isDeadEnd(it.word, setOf(it.word)) },
+                userFollowUps = { game.repliesFor(it.word, setOf(it.word)) },
+            ) ?: error("첫 단어를 고를 수 없음 — 사전 확인 필요")
             game.update { copy(used = listOf(first.word), lastAiWord = first.word) }
             return game
         }

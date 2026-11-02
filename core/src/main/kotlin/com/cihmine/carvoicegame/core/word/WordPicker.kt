@@ -6,7 +6,7 @@ import kotlin.random.Random
 /**
  * AI 쪽 단어 선택. 난이도는 AI 가 내는 단어의 어려움이 아니라 **AI 의 실력**이다.
  * - 어느 난이도든 익숙한 단어부터 말한다(익숙함 단계 0 → 1 → 2).
- * - 쉬움: 사용자가 이을 쉬운 단어가 많은 끝 글자를 골라 준다. 익숙한 단어(0·1단계)가 떨어지면 AI 가 진다.
+ * - 쉬움: 사용자가 일상 단어로 이을 수 있는 끝 글자를 골라 준다. 일상 단어(0단계)가 떨어지면 AI 가 진다.
  * - 보통: 끝 글자는 고르지 않고 무작위. 막히면 낯선 단어(2단계)까지 쓴다.
  * - 어려움: 사용자가 이을 쉬운 단어가 적은 끝 글자를 골라 압박한다. 막히면 낯선 단어까지 쓴다.
  * 상대가 이을 단어가 아예 없는 한방 단어([avoid])는 내지 않는다. 그것밖에 없으면 AI 가 진다.
@@ -29,8 +29,11 @@ class WordPicker(private val random: Random) {
         return choose(usable.filter { it.familiarity == tier }, difficulty, userFollowUps)
     }
 
-    /** 쉬움은 낯선 단어를 꺼내지 않는다(그만큼 일찍 진다). */
-    private fun maxFamiliarity(difficulty: Difficulty) = if (difficulty == Difficulty.EASY) 1 else 2
+    /**
+     * 쉬움은 직접 고른 일상 단어(0단계)만 쓴다. 우리말샘 "쉬운" 단어(1단계)도 실제로는 낯선 말이 많아,
+     * 그런 말을 꺼내느니 AI 가 져 준다(가족용 쉬움은 사용자가 이기는 경험이 중요).
+     */
+    private fun maxFamiliarity(difficulty: Difficulty) = if (difficulty == Difficulty.EASY) 0 else 2
 
     private fun choose(pool: List<WordEntry>, difficulty: Difficulty, userFollowUps: (WordEntry) -> Int): WordEntry {
         if (difficulty == Difficulty.NORMAL || pool.size == 1) return pool.random(random)

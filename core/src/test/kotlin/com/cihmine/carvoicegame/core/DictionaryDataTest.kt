@@ -26,6 +26,14 @@ class DictionaryDataTest {
     }
 
     @Test
+    fun `일상 단어 목록의 단어는 모두 우리말샘 파일에 있다`() {
+        val opendict = raw.filter { it.first == "/data/words_opendict.tsv" }.map { it.second.word }.toSet()
+        val missing = WordDictionary.everydayWords() - opendict
+        assertTrue(missing.isEmpty(), "사전에 없는 일상 단어: $missing")
+        assertTrue(WordDictionary.loadSample().entries.count { it.familiarity == 0 } > 1_500)
+    }
+
+    @Test
     fun `가족 게임에 맞지 않는 성적·성매매·성폭력 단어와 뜻풀이가 없다`() {
         // tools/fetch-opendict.mjs·server/api/word.js 의 걸러내기 기준과 같게 유지한다.
         val badMeaning = listOf(

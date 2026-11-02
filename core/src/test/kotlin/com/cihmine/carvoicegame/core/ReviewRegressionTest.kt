@@ -13,6 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /** 2026-11-02 codex 점검에서 나온 지적을 재현하는 테스트 */
 class ReviewRegressionTest {
@@ -70,6 +71,37 @@ class ReviewRegressionTest {
         g.speechFinished(0)
         assertEquals(TurnResult.NotAccepting, g.submit(listOf("과자"), 10_001))
         assertEquals(TickResult.OfferHint, g.tick(10_001))
+    }
+
+    private fun l1(word: String) = WordEntry(word, 1, "뜻", core = false)
+    private fun core(word: String) = WordEntry(word, 1, "뜻")
+
+    @Test
+    fun `쉬움 AI 는 우리말샘 단어(난이도 1 포함)를 내지 않고 진다`() {
+        val d = WordDictionary(listOf(core("모자"), core("자두"), l1("두렁"), core("렁렁")))
+        assertEquals(TurnResult.Accepted("자두", null), chainGame("모자", d).submit(listOf("자두"), 0))
+        assertIs<TurnResult.Accepted>(chainGame("모자", d, Difficulty.NORMAL).submit(listOf("자두"), 0)).also {
+            assertEquals("두렁", it.aiWord, "보통은 우리말샘 단어로 버틴다")
+        }
+    }
+
+    @Test
+    fun `쉬움은 일상 단어로 이을 수 있는 끝 글자를 고른다(우리말샘 단어 수는 세지 않음)`() {
+        // 가방 뒤에는 우리말샘 단어만 셋, 가지 뒤에는 일상 단어 하나
+        val d = WordDictionary(listOf(core("모자"), core("자가"), core("가방"), core("가지"), l1("방석"), l1("방울"), l1("방패"), core("지도")))
+        repeat(10) { seed ->
+            val g = WordGame.restore(chainGame("모자", d).state, d, Random(seed)).also { it.resume() }
+            assertEquals("가지", assertIs<TurnResult.Accepted>(g.submit(listOf("자가"), 0)).aiWord)
+        }
+    }
+
+    @Test
+    fun `쉬움 첫 단어는 일상 단어로 이을 수 있는 끝 글자다`() {
+        val d = WordDictionary(listOf(core("가방"), core("가지"), l1("방석"), l1("방울"), core("지도"), core("도토리"), core("이불"), core("불꽃")))
+        repeat(20) { seed ->
+            val first = WordGame.start(GameKind.WORD_CHAIN, Difficulty.EASY, PlayMode.PARKED, d, Random(seed)).state.lastAiWord
+            assertTrue(first != "가방", "seed $seed: 일상 단어로 못 잇는 첫 단어 $first")
+        }
     }
 
     @Test
