@@ -123,12 +123,12 @@ class AdPlannerTest {
     }
 
     @Test
-    fun `A05 실제 데모 캠페인 - 아이오닉은 이을 쉬운 단어가 없어 자동 노출에서 빠진다`() {
+    fun `A05 실제 데모 캠페인 - 사전이 커져 아이오닉도 이을 쉬운 단어(닉네임·익일 등)가 생겨 노출된다`() {
         val checks = CampaignCatalog.loadDemo().check(WordDictionary.loadSample(), now)
         val byWord = checks.associateBy { it.campaign.word }
         assertTrue(byWord.getValue("현대").ok, "현대: ${byWord.getValue("현대")}")
         assertTrue(byWord.getValue("그랜저").ok, "그랜저: ${byWord.getValue("그랜저")}")
-        assertEquals(listOf(CampaignProblem.FEW_FAMILIAR_FOLLOW_UPS), byWord.getValue("아이오닉").problems)
+        assertTrue(byWord.getValue("아이오닉").ok, "아이오닉: ${byWord.getValue("아이오닉")}")
     }
 
     @Test
