@@ -240,8 +240,11 @@ class GameController(app: Application) : AndroidViewModel(app) {
         listenToken++
         // 질문 중에 누른 버튼은 그 질문의 답으로 처리한다(힌트 질문의 '힌트' = 네). 질문 상태와 판 상태가 갈라지지 않게.
         val ask = _ui.value.ask
-        // 일시정지는 질문 중에도 바로 멈춘다(질문은 지우고, 재개하면 엔진이 다시 묻는다).
-        if (ask != Ask.NONE && command != VoiceCommand.PAUSE) return answerAsk(ask, ParsedUtterance.Command(command))
+        // 일시정지·그만은 질문 중에도 바로 실행한다(질문은 지우고, 재개하면 엔진이 다시 묻는다).
+        if (ask != Ask.NONE) {
+            if (command != VoiceCommand.PAUSE && command != VoiceCommand.QUIT) return answerAsk(ask, ParsedUtterance.Command(command))
+            _ui.update { it.copy(ask = Ask.NONE) }
+        }
         command(command)
     }
 
@@ -269,7 +272,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
         val top = candidates.first()
         log(true, top)
         // 명령어처럼 들려도 지금 차례에 맞는 답(예: 초성 ㅍㄱ 판의 "포기")일 때만 답으로 본다.
-        val parsed = parser.parse(top) { _ui.value.ask == Ask.NONE && g.acceptableWord(listOf(it)) != null }
+        // STT 후보 중 하나라도 맞는 답이면(["포기", "고기"]의 "고기") 명령보다 답을 우선한다.
+        val parsed = parser.parse(top) { _ui.value.ask == Ask.NONE && g.acceptableWord(candidates) != null }
         val ask = _ui.value.ask
         if (ask != Ask.NONE) return answerAsk(ask, parsed)
         if (g.state.paused) {
