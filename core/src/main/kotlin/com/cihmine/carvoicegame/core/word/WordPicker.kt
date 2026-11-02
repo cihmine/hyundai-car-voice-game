@@ -9,7 +9,7 @@ import kotlin.random.Random
  * - 쉬움: 사용자가 이을 쉬운 단어가 많은 끝 글자를 골라 준다. 익숙한 단어(0·1단계)가 떨어지면 AI 가 진다.
  * - 보통: 끝 글자는 고르지 않고 무작위. 막히면 낯선 단어(2단계)까지 쓴다.
  * - 어려움: 사용자가 이을 쉬운 단어가 적은 끝 글자를 골라 압박한다. 막히면 낯선 단어까지 쓴다.
- * 어느 난이도든 상대가 이을 단어가 아예 없는 한방 단어는 가급적 피한다([avoid]).
+ * 상대가 이을 단어가 아예 없는 한방 단어([avoid])는 내지 않는다. 그것밖에 없으면 AI 가 진다.
  */
 class WordPicker(private val random: Random) {
 
@@ -23,14 +23,10 @@ class WordPicker(private val random: Random) {
         avoid: (WordEntry) -> Boolean = { false },
         userFollowUps: (WordEntry) -> Int = { 0 },
     ): WordEntry? {
-        val vocabulary = options.filter { it.familiarity <= maxFamiliarity(difficulty) }
-        if (vocabulary.isEmpty()) return null
-        for (allowAvoided in listOf(false, true)) {
-            val usable = vocabulary.filter { allowAvoided || !avoid(it) }
-            val tier = usable.minOfOrNull { it.familiarity } ?: continue
-            return choose(usable.filter { it.familiarity == tier }, difficulty, userFollowUps)
-        }
-        return null
+        // 한방 단어는 여기서 내지 않는다(어려움의 확인된 한방은 WordGame 이 따로 고른다). 남은 게 한방뿐이면 AI 가 진다.
+        val usable = options.filter { it.familiarity <= maxFamiliarity(difficulty) && !avoid(it) }
+        val tier = usable.minOfOrNull { it.familiarity } ?: return null
+        return choose(usable.filter { it.familiarity == tier }, difficulty, userFollowUps)
     }
 
     /** 쉬움은 낯선 단어를 꺼내지 않는다(그만큼 일찍 진다). */

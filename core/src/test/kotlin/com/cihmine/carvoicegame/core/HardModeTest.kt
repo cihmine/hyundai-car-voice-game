@@ -79,7 +79,8 @@ class HardModeTest {
     fun `사전에 없는 사용자 단어를 인터넷에서 찾으면 인정한다`() {
         val g = game(Difficulty.NORMAL, lastAiWord = "침출")
         assertEquals("출발", g.wordToLookUp(listOf("출발")))
-        g.learn(listOf(WordEntry("출발", 2, "길을 떠남"), WordEntry("발바닥", 2, "발의 아래쪽")))
+        // '닥나무'가 있어야 '발바닥'이 한방 단어가 아니다(AI 는 확인 안 된 한방을 내지 않음).
+        g.learn(listOf(WordEntry("출발", 2, "길을 떠남"), WordEntry("발바닥", 2, "발의 아래쪽"), WordEntry("닥나무", 2, "나무")))
         assertNull(g.wordToLookUp(listOf("출발")))
         assertEquals("발바닥", aiWord(g.submit(listOf("출발"), 0))) // 보통은 인터넷에서 찾은 낯선 단어로도 잇는다
         assertTrue(g.state.learned.any { it.word == "출발" })

@@ -57,7 +57,11 @@ class AndroidSpeechOutput(context: Context, onReady: (Boolean) -> Unit) : VoiceO
         val id = "u${++counter}"
         pending = id to onDone
         tts.setSpeechRate(ratePercent / 100f)
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+        // 요청 등록 자체가 실패하면(엔진 연결 끊김 등) 완료 콜백이 오지 않으므로 바로 다음으로 넘어간다.
+        if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) == TextToSpeech.ERROR) {
+            Log.w(TAG, "TTS speak 요청 실패")
+            main.post { deliver(id) }
+        }
     }
 
     override fun stop() {

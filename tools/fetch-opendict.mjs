@@ -115,10 +115,16 @@ async function search(key, syllable) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 차 안에서 가족이 하는 게임이므로 비속어·남을 낮잡는 말·성적인 말은 넣지 않는다.
+// core DictionaryDataTest·server/api/word.js 와 같은 기준으로 유지한다.
 const BAD_WORD_PARTS = ["좆", "씹", "병신", "지랄", "개새", "창녀", "니미", "불알", "보지", "자지"];
-const BAD_MEANING_PARTS = ["낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란"];
+const BAD_WORDS = new Set(["자위", "성기", "간통", "눈엣가시", "화대", "섹스어필", "섹시녀", "섹시미", "섹기"]);
+const BAD_MEANING_PARTS = [
+  "낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란",
+  "매춘", "매음", "성매매", "창기", "창녀", "창가(", "유곽", "몸을 파", "강간", "간음", "음탕",
+  "성욕", "성적 ", "성적인", "성적(", "성기(", "성기 ", "성행위", "애무", "정액(",
+];
 const isUnsuitable = (word, meaning) =>
-  BAD_WORD_PARTS.some((p) => word.includes(p)) || BAD_MEANING_PARTS.some((p) => meaning.includes(p));
+  BAD_WORDS.has(word) || BAD_WORD_PARTS.some((p) => word.includes(p)) || BAD_MEANING_PARTS.some((p) => meaning.includes(p));
 
 /** 끝 글자(두음 변형 포함)로 시작하는 단어가 하나도 없는 글자들 */
 function deadEndChars(words) {

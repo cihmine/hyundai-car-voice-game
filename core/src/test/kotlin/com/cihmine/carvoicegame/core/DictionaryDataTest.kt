@@ -26,6 +26,19 @@ class DictionaryDataTest {
     }
 
     @Test
+    fun `가족 게임에 맞지 않는 성적·성매매·성폭력 단어와 뜻풀이가 없다`() {
+        // tools/fetch-opendict.mjs·server/api/word.js 의 걸러내기 기준과 같게 유지한다.
+        val badMeaning = listOf(
+            "낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란",
+            "매춘", "매음", "성매매", "창기", "창녀", "창가(", "유곽", "몸을 파", "강간", "간음", "음탕",
+            "성욕", "성적 ", "성적인", "성적(", "성기(", "성기 ", "성행위", "애무", "정액(",
+        )
+        val badWord = setOf("자위", "성기", "간통", "눈엣가시", "화대", "섹스어필", "섹시녀", "섹시미", "섹기")
+        val bad = raw.filter { (_, e) -> e.word in badWord || badMeaning.any { it in e.meaning } }
+        assertTrue(bad.isEmpty(), "부적절: ${bad.map { "${it.second.word}(${it.second.meaning.take(20)})" }}")
+    }
+
+    @Test
     fun `모든 단어는 두 글자 이상 한글이고 난이도는 1~3`() {
         val bad = raw.filter { (_, e) -> e.word.length < 2 || !e.word.all(Hangul::isSyllable) || e.level !in 1..3 }
         assertTrue(bad.isEmpty(), "형식 오류: ${bad.map { "${it.first}: ${it.second.word}" }}")

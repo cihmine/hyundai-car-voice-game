@@ -7,13 +7,18 @@
 // 차 안 가족 게임이므로 비속어·남을 낮잡는 말은 돌려주지 않는다(tools/fetch-opendict.mjs 와 같은 기준).
 
 const BAD_WORD_PARTS = ["좆", "씹", "병신", "지랄", "개새", "창녀", "니미", "불알", "보지", "자지"];
-const BAD_MEANING_PARTS = ["낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란"];
+const BAD_WORDS = new Set(["자위", "성기", "간통", "눈엣가시", "화대", "섹스어필", "섹시녀", "섹시미", "섹기"]);
+const BAD_MEANING_PARTS = [
+  "낮잡아", "속되게", "비속", "얕잡아", "욕으로", "생식기", "성교", "음란",
+  "매춘", "매음", "성매매", "창기", "창녀", "창가(", "유곽", "몸을 파", "강간", "간음", "음탕",
+  "성욕", "성적 ", "성적인", "성적(", "성기(", "성기 ", "성행위", "애무", "정액(",
+];
 const HANGUL = /^[가-힣]+$/;
 const MEANING_MAX = 60;
 const MAX_RESULTS = 30;
 
 const isUnsuitable = (word, meaning) =>
-  BAD_WORD_PARTS.some((p) => word.includes(p)) || BAD_MEANING_PARTS.some((p) => meaning.includes(p));
+  BAD_WORDS.has(word) || BAD_WORD_PARTS.some((p) => word.includes(p)) || BAD_MEANING_PARTS.some((p) => meaning.includes(p));
 
 function shortMeaning(def) {
   let s = String(def).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
@@ -65,15 +70,20 @@ export default async function handler(req, res) {
     const text = await upstream.text();
     let channel;
     try {
-      channel = JSON.parse(text).channel ?? {};
+      channel = JSON.parse(text).channel;
     } catch {
       return res.status(502).json({ error: "upstream" }); // 키 오류 등은 XML 로 온다
+    }
+    // 오류 응답·모양이 다른 응답을 "이을 단어 0개"로 착각해 한방으로 확정·캐시하지 않는다.
+    const total = Number(channel?.total);
+    if (!upstream.ok || !channel || !Number.isFinite(total) || total < 0) {
+      return res.status(502).json({ error: "upstream" });
     }
     // 같은 질문은 하루 동안 CDN 에 저장해 우리말샘 하루 한도를 아낀다.
     res.setHeader("Cache-Control", "public, s-maxage=86400, stale-while-revalidate=604800");
     // anyWords: 거르기 전 두 글자 이상 항목의 전체 수. 앱은 이것이 0일 때만 "이을 단어 없음(한방)"으로 본다 —
     // 앞 10개에 쓸 만한 명사가 없을 뿐인 글자를 한방으로 잘못 쓰지 않도록 보수적으로 판단한다.
-    const anyWords = Number(channel.total ?? 0);
+    const anyWords = total;
     return res.status(200).json({ entries: toEntries(channel.item ?? [], { exactWord: mode === "exact" ? q : undefined }), anyWords });
   } catch {
     return res.status(504).json({ error: "timeout" });

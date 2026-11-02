@@ -159,6 +159,8 @@ class WordGame private constructor(
      */
     fun submit(candidates: List<String>, now: Long, turn: Int? = null): TurnResult {
         if (!acceptingAnswer() || (turn != null && turn != state.turn)) return TurnResult.NotAccepting
+        // 시간이 끝났는데 아직 tick 이 돌지 않았을 수 있다. 시간 안에 말을 시작했다면 시계가 멈춰 있어 만료가 아니다.
+        if (state.clock.isExpired(now)) return TurnResult.NotAccepting
         // 승인된 다른 표기는 정식 표기로 바꿔 같은 단어로 중복 검사한다.
         val normalized = normalize(candidates)
 
@@ -202,7 +204,8 @@ class WordGame private constructor(
                 lastAiAdCampaignId = last.lastAiAdBefore,
                 lastAiHanbang = last.lastAiHanbangBefore,
                 validUserWords = if (last.accepted) validUserWords - 1 else validUserWords,
-                clock = last.clockBefore,
+                // 판정 뒤 주행으로 바뀌었으면 주차 제한시간을 되살리지 않는다.
+                clock = if (last.clockBefore.hasLimit && !clock.hasLimit) clock else last.clockBefore,
                 phase = WordPhase.AWAIT_USER,
                 pendingConfirm = null,
                 lastTurn = null,
@@ -431,10 +434,13 @@ class WordGame private constructor(
         update { copy(paused = true, clock = clock.pause(now)) }
     }
 
-    /** 재개. 앱이 마지막 내용을 다시 안내하고 [speechFinished] 를 부르면 남은 시간이 흐른다. */
+    /**
+     * 재개. 앱이 마지막 내용을 다시 안내하고 [speechFinished] 를 부르면 남은 시간이 흐른다.
+     * 힌트 제안 중에 멈췄으면(시간은 이미 0) 답 대기로 돌려 다음 [tick] 에서 다시 힌트를 묻게 한다.
+     */
     fun resume() {
         if (isFinished) return
-        update { copy(paused = false) }
+        update { copy(paused = false, phase = if (phase == WordPhase.OFFER_HINT) WordPhase.AWAIT_USER else phase) }
     }
 
     /**

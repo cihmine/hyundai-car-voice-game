@@ -197,7 +197,8 @@ class WordGameTest {
 
     @Test
     fun `잘못 들었어를 세 번 말해도 한 번만 되돌린다`() {
-        val game = chainGame("사과")
+        // '이불'을 넣어 '유리'가 한방 단어가 되지 않게 한다(AI 는 한방을 내지 않음).
+        val game = chainGame("사과", dictionary = WordDictionary(chainDict.entries + WordEntry("이불", 1, "뜻")))
         game.speechFinished(0)
         game.submit(listOf("과자"), now = 1_000)
         game.speechFinished(2_000)

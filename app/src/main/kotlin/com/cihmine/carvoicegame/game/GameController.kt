@@ -170,7 +170,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
     /** 강제 종료 등으로 남은 판. 일시정지 상태로 불러오고 사용자가 이어하기를 눌러야 진행한다. */
     fun continueSaved() {
         val state = save.wordGame?.takeIf { it.outcome == null } ?: return
-        game = WordGame.restore(state, dictionary, rules = rules, planner = planner)
+        game = WordGame.restore(state, dictionary, rules = rules, planner = planner).also {
+            // 꺼져 있는 동안 차가 움직이기 시작했을 수 있다. 홈 화면에선 차량 변화를 판에 반영하지 않으므로 여기서 맞춘다.
+            it.changeMode(vehicle.currentMode())
+        }
         _ui.update { it.copy(screen = Screen.PLAYING, log = emptyList(), notice = "일시정지된 판을 불러왔어요") }
         publish()
     }
@@ -220,6 +223,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
             override fun onError(error: SpeechError) {
                 if (token != listenToken) return
+                // 말을 시작해 멈췄던 시계를 다시 흐르게 한다(이미 흐르는 중이면 그대로).
+                game?.speechFinished(now())
                 // 말이 없어서 끊긴 것이면 조용히 다시 듣는다. 시간 초과 판정은 엔진 시계가 한다.
                 if (error == SpeechError.NO_MATCH || error == SpeechError.TIMEOUT) listen()
                 else _ui.update { it.copy(mic = Mic.OFF, notice = "음성 인식 오류(${error.name}) — 글자 입력을 써 주세요") }
@@ -233,6 +238,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (g.isFinished || g.state.paused || busy) return
         stt.cancel()
         listenToken++
+        // 질문 중에 누른 버튼은 그 질문의 답으로 처리한다(힌트 질문의 '힌트' = 네). 질문 상태와 판 상태가 갈라지지 않게.
+        val ask = _ui.value.ask
+        // 일시정지는 질문 중에도 바로 멈춘다(질문은 지우고, 재개하면 엔진이 다시 묻는다).
+        if (ask != Ask.NONE && command != VoiceCommand.PAUSE) return answerAsk(ask, ParsedUtterance.Command(command))
         command(command)
     }
 
@@ -259,7 +268,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (busy) return
         val top = candidates.first()
         log(true, top)
-        val parsed = parser.parse(top) { dictionary.lookup(it) != null && _ui.value.ask == Ask.NONE }
+        // 명령어처럼 들려도 지금 차례에 맞는 답(예: 초성 ㅍㄱ 판의 "포기")일 때만 답으로 본다.
+        val parsed = parser.parse(top) { _ui.value.ask == Ask.NONE && g.acceptableWord(listOf(it)) != null }
         val ask = _ui.value.ask
         if (ask != Ask.NONE) return answerAsk(ask, parsed)
         if (g.state.paused) {
@@ -490,9 +500,14 @@ class GameController(app: Application) : AndroidViewModel(app) {
         val g = game ?: return
         when (ask) {
             Ask.RULES -> if (yes) say(Phrases.rules(g.state.kind, rules)) { speakOpening() } else speakOpening()
-            Ask.HINT -> if (yes) giveHint() else {
-                g.declineHint(now())
-                finishRound(Phrases.TIME_UP)
+            Ask.HINT -> when {
+                // 질문 사이 주행 전환 등으로 힌트 제안 상태가 아니면 판을 끝내지 않는다.
+                g.state.phase != WordPhase.OFFER_HINT -> repeatPrompt(null)
+                yes -> giveHint()
+                else -> {
+                    g.declineHint(now())
+                    finishRound(Phrases.TIME_UP)
+                }
             }
             Ask.QUIT -> if (yes) voidRound() else repeatPrompt(Phrases.KEEP_GOING)
             Ask.RESUME -> if (yes) resume() else _ui.update { it.copy(mic = Mic.OFF) }
@@ -596,7 +611,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (g.isFinished) return
         focus.acquire()
         g.resume()
-        _ui.update { it.copy(notice = null) }
+        _ui.update { it.copy(notice = null, ask = Ask.NONE) }
         publish()
         repeatPrompt("다시 시작할게요.")
     }
