@@ -1,6 +1,7 @@
 package com.cihmine.carvoicegame.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,9 +59,11 @@ private const val DEMO_COUPON_COST = 50
 @Composable
 fun GameApp(controller: GameController) {
     val ui by controller.ui.collectAsState()
+    // 실제 사용자 화면: 검은 화면 + 빛나는 원 + 자막. 보관함은 터치 화면으로 연다.
+    if (ui.stageMode && ui.screen != Screen.LOCKER) return VoiceStage(ui, controller)
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize()) {
-            SimulationBanner(ui)
+            SimulationBanner(ui, controller)
             Row(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxHeight().padding(24.dp)) {
                     when (ui.screen) {
@@ -77,7 +80,7 @@ fun GameApp(controller: GameController) {
 }
 
 @Composable
-private fun SimulationBanner(ui: GameUi) {
+private fun SimulationBanner(ui: GameUi, c: GameController) {
     val voice = buildList {
         add(if (ui.ttsReady) "음성 안내: ${ui.ttsEngine}" else "음성 안내 없음(화면 표시)")
         add(if (ui.micGranted && ui.sttAvailable) "음성 인식: ${ui.sttEngine}" else "음성 인식 없음 → 글자 입력 대체 시연")
@@ -89,6 +92,7 @@ private fun SimulationBanner(ui: GameUi) {
     ) {
         Text("차량 연동 시뮬레이션 · 모의 차량 상태: ${ui.vehicle.label}", color = Color(0xFFFFD54F))
         Text(voice, color = Color(0xFFFFD54F))
+        Text("◀ 음성 화면", color = Color.White, modifier = Modifier.clickable { c.setStageMode(true) })
     }
 }
 

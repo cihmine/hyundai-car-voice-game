@@ -93,6 +93,12 @@ data class GameUi(
     val menuDifficulty: Difficulty = Difficulty.EASY,
     /** 음성 안내 엔진 준비 결과가 왔는지(실패여도 true) — 안내를 못 해도 듣기는 시작한다 */
     val ttsChecked: Boolean = false,
+    /** 사용자 화면 자막: AI 가 지금(마지막으로) 한 말 — 흰색 */
+    val aiCaption: String? = null,
+    /** 사용자 화면 자막: 사용자가 말하는 중(중간 인식)·마지막으로 인식된 말 — 회색 */
+    val userCaption: String? = null,
+    /** 사용자 화면(검은 화면·빛나는 원·자막)으로 보는지. 끄면 터치 화면·시연 패널 */
+    val stageMode: Boolean = true,
 )
 
 /**
@@ -160,6 +166,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private fun now() = SystemClock.elapsedRealtime()
 
+    private fun showUserCaption(text: String) = _ui.update { it.copy(userCaption = text) }
+
+    fun setStageMode(on: Boolean) = _ui.update { it.copy(stageMode = on) }
+
     fun setMicGranted(granted: Boolean) {
         _ui.update { it.copy(micGranted = granted) }
         homeVoiceLater()
@@ -210,6 +220,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (!_ui.value.micGranted || !_ui.value.sttAvailable) return
         stt.listen(object : SpeechInput.Listener {
             override fun onSpeechStart() = Unit
+            override fun onPartial(text: String) {
+                if (token == listenToken) showUserCaption(text)
+            }
+
             override fun onResult(candidates: List<String>) {
                 if (token == listenToken) onHomeUtterance(candidates.firstOrNull().orEmpty())
             }
@@ -229,7 +243,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private fun onHomeUtterance(text: String) {
         DebugLog.d(TAG) { "home heard: $text" }
         if (!onHome()) return
-        if (text.isNotBlank()) log(true, text)
+        if (text.isNotBlank()) {
+            log(true, text)
+            showUserCaption(text)
+        }
         when (val choice = MenuParser.parse(text)) {
             is MenuChoice.Start -> start(choice.kind, choice.difficulty ?: difficultyFor(choice.kind))
             MenuChoice.Any -> start(GameKind.WORD_CHAIN, difficultyFor(GameKind.WORD_CHAIN))
@@ -326,7 +343,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         listenToken++
         game?.speechStarted(now())
         log(false, text)
-        _ui.update { it.copy(mic = Mic.SPEAKING) }
+        _ui.update { it.copy(mic = Mic.SPEAKING, aiCaption = text, userCaption = null) }
         if (_ui.value.ttsReady) tts.speak(text, save.speechRatePercent, then) else then()
     }
 
@@ -350,6 +367,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
         stt.listen(object : SpeechInput.Listener {
             override fun onSpeechStart() {
                 if (token == listenToken) game?.userSpeechStarted(now())
+            }
+
+            override fun onPartial(text: String) {
+                if (token == listenToken) showUserCaption(text)
             }
 
             override fun onResult(candidates: List<String>) {
@@ -410,6 +431,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (busy) return
         val top = candidates.first()
         lastHeard = top
+        showUserCaption(top)
         log(true, top)
         // 명령어처럼 들려도 지금 차례에 맞는 답(예: 초성 ㅍㄱ 판의 "포기")일 때만 답으로 본다.
         // STT 후보 중 하나라도 맞는 답이면(["포기", "고기"]의 "고기") 명령보다 답을 우선한다.
@@ -613,6 +635,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (!_ui.value.micGranted || !_ui.value.sttAvailable) return
         stt.listen(object : SpeechInput.Listener {
             override fun onSpeechStart() = Unit
+            override fun onPartial(text: String) {
+                if (token == listenToken) showUserCaption(text)
+            }
+
             override fun onResult(candidates: List<String>) {
                 if (token == listenToken) onUtterance(candidates, null)
             }

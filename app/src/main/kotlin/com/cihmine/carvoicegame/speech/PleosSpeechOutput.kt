@@ -46,7 +46,9 @@ class PleosSpeechOutput(context: Context, onReady: (Boolean) -> Unit) : VoiceOut
             DebugLog.d(TAG) { "onReady" }
         }
 
-        override fun onUpdatedRms(rms: Double) = Unit
+        override fun onUpdatedRms(rms: Double) {
+            main.post { if (pending != null) VoiceLevel.ai(rms) }
+        }
         override fun onError(error: ErrorType) {
             Log.w(TAG, "TTS error $error")
             main.post { finish() }
@@ -76,6 +78,7 @@ class PleosSpeechOutput(context: Context, onReady: (Boolean) -> Unit) : VoiceOut
         val done = pending ?: return
         pending = null
         started = false
+        VoiceLevel.aiSilent()
         done()
     }
 
@@ -90,6 +93,7 @@ class PleosSpeechOutput(context: Context, onReady: (Boolean) -> Unit) : VoiceOut
     override fun stop() {
         pending = null
         started = false
+        VoiceLevel.aiSilent()
         if (ready) tts.stop()
     }
 

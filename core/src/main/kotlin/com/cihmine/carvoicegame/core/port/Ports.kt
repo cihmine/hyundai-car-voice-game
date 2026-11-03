@@ -18,6 +18,9 @@ interface SpeechInput {
         fun onSpeechStart()
         fun onResult(candidates: List<String>)
         fun onError(error: SpeechError)
+
+        /** 말하는 도중의 중간 인식 결과(화면 자막용). 엔진이 주지 않으면 오지 않는다. */
+        fun onPartial(text: String) = Unit
     }
 }
 

@@ -52,17 +52,21 @@ class AndroidSpeechInput(private val context: Context) : VoiceInput {
             }
 
             override fun onReadyForSpeech(params: Bundle?) = Unit
-            override fun onRmsChanged(rmsdB: Float) = Unit
+            override fun onRmsChanged(rmsdB: Float) = VoiceLevel.userDb(rmsdB)
             override fun onBufferReceived(buffer: ByteArray?) = Unit
             override fun onEndOfSpeech() = Unit
-            override fun onPartialResults(partialResults: Bundle?) = Unit
+            override fun onPartialResults(partialResults: Bundle?) {
+                partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                    ?.takeIf { it.isNotBlank() }?.let(listener::onPartial)
+            }
             override fun onEvent(eventType: Int, params: Bundle?) = Unit
         })
         r.startListening(
             Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ko-KR")
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5),
+                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true),
         )
     }
 

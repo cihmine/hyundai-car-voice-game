@@ -54,7 +54,9 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
         override fun onStartedRecognition() = Unit
         override fun onUpdatedEpdData(start: Long, end: Long) = Unit
         override fun onReady() = Unit
-        override fun onUpdatedRms(rms: Double) = Unit
+        override fun onUpdatedRms(rms: Double) {
+            main.post { if (current != null) VoiceLevel.user(rms) }
+        }
     }
 
     init {
@@ -83,8 +85,12 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
             heardSpeech = true
             listener.onSpeechStart()
         }
-        if (!completed) return
+        if (!completed) {
+            if (text.isNotBlank()) listener.onPartial(text)
+            return
+        }
         current = null
+        VoiceLevel.userSilent()
         if (text.isBlank()) listener.onError(SpeechError.NO_MATCH) else listener.onResult(listOf(text))
     }
 
@@ -92,6 +98,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
         DebugLog.d(TAG) { "fail $error active=${current != null}" }
         val listener = current ?: return
         current = null
+        VoiceLevel.userSilent()
         listener.onError(error)
     }
 
@@ -105,6 +112,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     override fun cancel() {
         if (current == null) return
         current = null
+        VoiceLevel.userSilent()
         stt.stop()
     }
 
