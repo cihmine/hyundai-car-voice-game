@@ -91,6 +91,8 @@ data class GameUi(
     /** 처음 화면에서 고른 게임·난이도(터치와 음성이 같은 값을 쓴다) */
     val menuKind: GameKind = GameKind.WORD_CHAIN,
     val menuDifficulty: Difficulty = Difficulty.EASY,
+    /** 음성 안내 엔진 준비 결과가 왔는지(실패여도 true) — 안내를 못 해도 듣기는 시작한다 */
+    val ttsChecked: Boolean = false,
 )
 
 /**
@@ -116,7 +118,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     val ui: StateFlow<GameUi> = _ui
 
     private val stt = Voice.input(app) { ok -> _ui.update { it.copy(sttAvailable = ok) }; homeVoiceLater() }
-    private val tts = Voice.output(app) { ok -> _ui.update { it.copy(ttsReady = ok) }; homeVoiceLater() }
+    private val tts = Voice.output(app) { ok -> _ui.update { it.copy(ttsReady = ok, ttsChecked = true) }; homeVoiceLater() }
     private val focus = AudioFocus(app, onLost = { pause(byAudioFocus = true) }, onRegained = ::offerResume)
 
     private var game: WordGame? = null
@@ -184,7 +186,12 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (!foreground || u.screen != Screen.HOME || game != null) return
         if (!u.micGranted || !u.sttAvailable) return
         if (homePromptPending) {
-            if (!u.ttsReady) return
+            if (!u.ttsReady) {
+                // 음성 안내를 쓸 수 없으면 묻지 않고 듣기만 한다(화면 문구가 대신 안내)
+                if (!u.ttsChecked) return
+                homePromptPending = false
+                return listenHome()
+            }
             homePromptPending = false
             homeNudged = false
             val saved = save.wordGame?.takeIf { it.outcome == null } != null
@@ -235,6 +242,13 @@ class GameController(app: Application) : AndroidViewModel(app) {
                     say(Phrases.NOTHING_TO_RESUME) { listenHome() }
                 }
             MenuChoice.Rules -> say(Phrases.MENU_RULES) { listenHome() }
+            // "됐어" 같은 말은 차 안 대화에도 흔하다 — 처음 한 번만 대답하고 그 뒤로는 조용히 듣는다
+            MenuChoice.Later -> if (!homeNudged) {
+                homeNudged = true
+                say(Phrases.MENU_LATER) { listenHome() }
+            } else {
+                listenHome()
+            }
             MenuChoice.Unknown -> if (!homeNudged && text.isNotBlank()) {
                 homeNudged = true
                 say(Phrases.MENU_RETRY) { listenHome() }
@@ -250,6 +264,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     fun onAppStarted() {
         foreground = true
+        // 판 끝 질문 중에 내려갔다 돌아오면 그 질문의 대답을 다시 듣는다
+        val ask = _ui.value.ask
+        if (_ui.value.screen == Screen.RESULT && (ask == Ask.NEXT_LEVEL || ask == Ask.PLAY_AGAIN)) return listenForAnswer()
         startHomeVoice()
     }
 
@@ -286,6 +303,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     /** 강제 종료 등으로 남은 판. 일시정지 상태로 불러오고 사용자가 이어하기를 눌러야 진행한다. */
     fun continueSaved() {
+        stopVoice()
         val state = save.wordGame?.takeIf { it.outcome == null } ?: return
         game = WordGame.restore(state, dictionary, rules = rules, planner = planner).also {
             // 꺼져 있는 동안 차가 움직이기 시작했을 수 있다. 홈 화면에선 차량 변화를 판에 반영하지 않으므로 여기서 맞춘다.
@@ -600,7 +618,12 @@ class GameController(app: Application) : AndroidViewModel(app) {
             }
 
             override fun onError(error: SpeechError) {
-                if (token == listenToken) listenForAnswer()
+                if (token != listenToken) return
+                if (error == SpeechError.NO_MATCH || error == SpeechError.TIMEOUT) return listenForAnswer()
+                viewModelScope.launch {
+                    delay(1_500)
+                    if (token == listenToken) listenForAnswer()
+                }
             }
         })
     }
@@ -669,8 +692,14 @@ class GameController(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(ask = Ask.NONE) }
             return say(Phrases.SEE_YOU) { goHome() }
         }
+        // 마이크를 계속 켜 두므로 상관없는 말마다 되묻지 않는다(한 번만 안내)
+        if (resultNudged) return listenForAnswer()
+        resultNudged = true
         say(Phrases.YES_OR_NO) { listenForAnswer() }
     }
+
+    /** 판 끝 질문에서 "네 또는 아니요로…"를 이미 한 번 말했는지 */
+    private var resultNudged = false
 
     private fun giveHint() {
         val g = game ?: return
@@ -805,6 +834,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
      */
     private fun offerNext(outcome: Outcome) {
         lastHeard = null
+        resultNudged = false
         when {
             outcome == Outcome.VOID -> goHome()
             outcome == Outcome.WIN && suggestedNext() != null -> ask(Ask.NEXT_LEVEL, Phrases.askNextLevel(suggestedNext()!!))
@@ -885,7 +915,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
     /** 화면이 꺼지거나 앱이 내려갈 때 남은 시간을 저장해 둔다. */
     fun onAppStopped() {
         foreground = false
-        if (game == null) stopVoice()
+        stopVoice()
         game?.takeIf { !it.isFinished }?.let {
             pause(byAudioFocus = false)
         }

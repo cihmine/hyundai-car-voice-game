@@ -38,6 +38,15 @@ class MenuParserTest {
     }
 
     @Test
+    fun `지금은 안 할 때`() {
+        assertEquals(MenuChoice.Later, MenuParser.parse("나중에 할래"))
+        assertEquals(MenuChoice.Later, MenuParser.parse("그만"))
+        assertEquals(MenuChoice.Later, MenuParser.parse("안 할래"))
+        // 게임 이름이 같이 있으면 게임이 우선
+        assertEquals(MenuChoice.Start(GameKind.WORD_CHAIN, null), MenuParser.parse("그만하고 끝말잇기 하자"))
+    }
+
+    @Test
     fun `게임과 상관없는 차 안 대화는 고르지 않는다`() {
         assertEquals(MenuChoice.Unknown, MenuParser.parse("오늘 점심 뭐 먹지"))
         assertEquals(MenuChoice.Unknown, MenuParser.parse("에어컨 좀 켜 줘"))

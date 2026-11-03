@@ -72,6 +72,7 @@ object Phrases {
 
     const val MENU_RETRY = "끝말잇기, 초성 대결 중에 말씀해 주세요."
     const val MENU_RULES = "끝말잇기는 앞 단어의 끝 글자로 시작하는 단어를 번갈아 말해요. 초성 대결은 정해진 초성에 맞는 두 글자 단어를 번갈아 말해요. 어떤 게임을 할까요?"
+    const val MENU_LATER = "알겠어요. 하고 싶을 때 게임 이름을 말씀해 주세요."
     const val NOTHING_TO_RESUME = "이어 할 판이 없어요. 끝말잇기, 초성 대결 중에 골라 주세요."
 
     fun askNextLevel(next: Difficulty) = "한 단계 어렵게, ${next.label} 단계로 해 볼까요?"
