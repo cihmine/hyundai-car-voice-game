@@ -670,7 +670,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (ask == Ask.NEXT_LEVEL || ask == Ask.PLAY_AGAIN) return answerNext(ask, command)
         val yes = command == VoiceCommand.YES || (ask == Ask.RESUME && command == VoiceCommand.RESUME) ||
             (ask == Ask.CONCEDE && command == VoiceCommand.GIVE_UP) ||
-            (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT)
+            (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT) ||
+            // "규칙 들어 볼까요?"에 "규칙 알려 줘"라고 답하면 네
+            (ask == Ask.RULES && command == VoiceCommand.RULES)
         val no = command == VoiceCommand.NO
         if (!yes && !no) return say(Phrases.YES_OR_NO) { listenForAnswer() }
         _ui.update { it.copy(ask = Ask.NONE) }

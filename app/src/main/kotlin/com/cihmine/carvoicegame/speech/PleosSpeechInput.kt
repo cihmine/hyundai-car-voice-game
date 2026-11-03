@@ -27,6 +27,9 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     private var current: SpeechInput.Listener? = null
     private var heardSpeech = false
 
+    /** 요청 번호. 결과·실패·취소·새 요청마다 올려서, 끝난 요청의 늦은 "인식 끝" 신호를 버린다. */
+    private var requestNo = 0
+
     private val results = object : ResultListener {
         override fun onUpdated(text: String, completed: Boolean) {
             main.post { deliver(text, completed) }
@@ -34,7 +37,12 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
 
         override fun onEndedRecognition() {
             // 최종 결과 없이 끝나면(말이 없었음) 다시 듣게 한다.
-            main.post { fail(SpeechError.NO_MATCH) }
+            // 에뮬 실측: 이 신호가 최종 결과(onUpdated completed=true)보다 0.01초쯤 먼저 온다 → 잠깐 기다렸다가
+            // 그사이 최종 결과가 오지 않았을 때만 "말 없음"으로 본다(같은 요청일 때만).
+            main.post {
+                val request = requestNo
+                main.postDelayed({ if (requestNo == request) fail(SpeechError.NO_MATCH) }, END_GRACE_MS)
+            }
         }
 
         override fun onError(error: ErrorType) {
@@ -90,6 +98,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
             return
         }
         current = null
+        requestNo++
         VoiceLevel.userSilent()
         if (text.isBlank()) listener.onError(SpeechError.NO_MATCH) else listener.onResult(listOf(text))
     }
@@ -98,6 +107,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
         DebugLog.d(TAG) { "fail $error active=${current != null}" }
         val listener = current ?: return
         current = null
+        requestNo++
         VoiceLevel.userSilent()
         listener.onError(error)
     }
@@ -105,6 +115,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     override fun listen(listener: SpeechInput.Listener) {
         if (!ready) return listener.onError(SpeechError.OTHER)
         current = listener
+        requestNo++
         heardSpeech = false
         stt.request()
     }
@@ -112,6 +123,7 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
     override fun cancel() {
         if (current == null) return
         current = null
+        requestNo++
         VoiceLevel.userSilent()
         stt.stop()
     }
@@ -123,5 +135,6 @@ class PleosSpeechInput(context: Context, onReady: (Boolean) -> Unit) : VoiceInpu
 
     private companion object {
         const val TAG = "PleosStt"
+        const val END_GRACE_MS = 300L
     }
 }

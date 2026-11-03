@@ -23,7 +23,11 @@ object VoiceLevel {
         if (rms <= FLOOR) 0f else (ln(rms / FLOOR) / ln(LOUD / FLOOR)).toFloat().coerceIn(0f, 1f)
 
     fun ai(rms: Double) { _ai.value = amplitude(rms) }
-    fun user(rms: Double) { _user.value = amplitude(rms) }
+    private var userCount = 0
+    fun user(rms: Double) {
+        _user.value = amplitude(rms)
+        if (userCount++ % 10 == 0) com.cihmine.carvoicegame.DebugLog.d("VoiceLevel") { "user rms=$rms level=${_user.value}" }
+    }
     fun userDb(db: Float) { _user.value = ((db - 1f) / 9f).coerceIn(0f, 1f) }
     fun aiSilent() { _ai.value = 0f }
     fun userSilent() { _user.value = 0f }
