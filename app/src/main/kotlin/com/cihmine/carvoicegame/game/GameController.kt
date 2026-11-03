@@ -15,6 +15,8 @@ import com.cihmine.carvoicegame.core.ad.AdPlanner
 import com.cihmine.carvoicegame.core.ad.BrandRound
 import com.cihmine.carvoicegame.core.ad.CampaignCatalog
 import com.cihmine.carvoicegame.core.command.CommandParser
+import com.cihmine.carvoicegame.core.command.MenuChoice
+import com.cihmine.carvoicegame.core.command.MenuParser
 import com.cihmine.carvoicegame.core.command.ParsedUtterance
 import com.cihmine.carvoicegame.core.command.SpeechRate
 import com.cihmine.carvoicegame.core.command.VoiceCommand
@@ -56,7 +58,15 @@ enum class Screen { HOME, PLAYING, RESULT, LOCKER }
 enum class Mic { OFF, SPEAKING, LISTENING }
 
 /** 예/아니요로 답을 기다리는 질문 */
-enum class Ask { NONE, RULES, HINT, QUIT, RESUME, CONCEDE }
+enum class Ask {
+    NONE, RULES, HINT, QUIT, RESUME, CONCEDE,
+
+    /** 이긴 뒤 "한 단계 어렵게 해 볼까요?" */
+    NEXT_LEVEL,
+
+    /** 진 뒤(또는 가장 어려운 단계에서 이긴 뒤) "한 판 더 할까요?" */
+    PLAY_AGAIN,
+}
 
 data class LogLine(val fromUser: Boolean, val text: String)
 
@@ -78,6 +88,9 @@ data class GameUi(
     val notice: String? = null,
     /** 단어 검색 중계 서버 주소가 설정돼 있는지(실제 연결 여부는 요청 때 판단) */
     val onlineDictionary: Boolean = false,
+    /** 처음 화면에서 고른 게임·난이도(터치와 음성이 같은 값을 쓴다) */
+    val menuKind: GameKind = GameKind.WORD_CHAIN,
+    val menuDifficulty: Difficulty = Difficulty.EASY,
 )
 
 /**
@@ -102,14 +115,23 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(GameUi(save = store.load() ?: SaveData()))
     val ui: StateFlow<GameUi> = _ui
 
-    private val stt = Voice.input(app) { ok -> _ui.update { it.copy(sttAvailable = ok) } }
-    private val tts = Voice.output(app) { ok -> _ui.update { it.copy(ttsReady = ok) } }
+    private val stt = Voice.input(app) { ok -> _ui.update { it.copy(sttAvailable = ok) }; homeVoiceLater() }
+    private val tts = Voice.output(app) { ok -> _ui.update { it.copy(ttsReady = ok) }; homeVoiceLater() }
     private val focus = AudioFocus(app, onLost = { pause(byAudioFocus = true) }, onRegained = ::offerResume)
 
     private var game: WordGame? = null
     private var listenToken = 0
     private var ticker: Job? = null
     private var pausedByAudioFocus = false
+
+    /** 앱을 켠 뒤 아직 "어떤 게임을 시작할까요?"를 묻지 않음(한 번만 묻는다) */
+    private var homePromptPending = true
+
+    /** 처음 화면에서 못 알아들은 말에 한 번 안내했는지(마이크를 계속 켜 두므로 차 안 대화마다 대답하지 않는다) */
+    private var homeNudged = false
+
+    /** 앱이 화면에 보이는지(내려가 있으면 처음 화면에서 듣지 않는다) */
+    private var foreground = true
 
     /** 지금 읽고 있는 광고 단어(중단 기록용) */
     private var speakingAd: AdEvent? = null
@@ -136,7 +158,100 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private fun now() = SystemClock.elapsedRealtime()
 
-    fun setMicGranted(granted: Boolean) = _ui.update { it.copy(micGranted = granted) }
+    fun setMicGranted(granted: Boolean) {
+        _ui.update { it.copy(micGranted = granted) }
+        homeVoiceLater()
+    }
+
+    // ── 처음 화면 음성 ──────────────────────────────────────
+    // 앱을 켜면 "어떤 게임을 시작할까요?"를 한 번 묻고, 처음 화면에 있는 동안 마이크를 계속 켜 둔다.
+
+    fun selectKind(kind: GameKind) {
+        if (!kind.isWordGame) return
+        _ui.update { it.copy(menuKind = kind, menuDifficulty = it.menuDifficulty.takeIf { d -> d in kind.difficulties } ?: Difficulty.EASY) }
+    }
+
+    fun selectDifficulty(difficulty: Difficulty) = _ui.update { it.copy(menuDifficulty = difficulty) }
+
+    /** 음성 엔진 준비·권한 콜백은 생성 도중에도 올 수 있어 한 박자 뒤에 처리한다. */
+    private fun homeVoiceLater() {
+        viewModelScope.launch { startHomeVoice() }
+    }
+
+    /** 처음 화면이고 음성을 쓸 수 있으면: 아직 안 물었으면 묻고, 아니면 조용히 듣는다. */
+    private fun startHomeVoice() {
+        val u = _ui.value
+        if (!foreground || u.screen != Screen.HOME || game != null) return
+        if (!u.micGranted || !u.sttAvailable) return
+        if (homePromptPending) {
+            if (!u.ttsReady) return
+            homePromptPending = false
+            homeNudged = false
+            val saved = save.wordGame?.takeIf { it.outcome == null } != null
+            say(Phrases.menuQuestion(saved)) { listenHome() }
+        } else if (u.mic == Mic.OFF) {
+            listenHome()
+        }
+    }
+
+    private fun onHome() = foreground && _ui.value.screen == Screen.HOME && game == null
+
+    private fun listenHome() {
+        if (!onHome()) return
+        val token = ++listenToken
+        _ui.update { it.copy(mic = Mic.LISTENING) }
+        if (!_ui.value.micGranted || !_ui.value.sttAvailable) return
+        stt.listen(object : SpeechInput.Listener {
+            override fun onSpeechStart() = Unit
+            override fun onResult(candidates: List<String>) {
+                if (token == listenToken) onHomeUtterance(candidates.firstOrNull().orEmpty())
+            }
+
+            override fun onError(error: SpeechError) {
+                if (token != listenToken) return
+                // 계속 켜 두는 마이크: 말이 없어 끊기면 바로, 다른 오류면 잠깐 쉬었다가 다시 듣는다.
+                if (error == SpeechError.NO_MATCH || error == SpeechError.TIMEOUT) return listenHome()
+                viewModelScope.launch {
+                    delay(1_500)
+                    if (token == listenToken) listenHome()
+                }
+            }
+        })
+    }
+
+    private fun onHomeUtterance(text: String) {
+        DebugLog.d(TAG) { "home heard: $text" }
+        if (!onHome()) return
+        if (text.isNotBlank()) log(true, text)
+        when (val choice = MenuParser.parse(text)) {
+            is MenuChoice.Start -> start(choice.kind, choice.difficulty ?: difficultyFor(choice.kind))
+            MenuChoice.Any -> start(GameKind.WORD_CHAIN, difficultyFor(GameKind.WORD_CHAIN))
+            is MenuChoice.NotReady -> say(Phrases.notReady(choice.kind)) { listenHome() }
+            MenuChoice.Resume ->
+                if (save.wordGame?.takeIf { it.outcome == null } != null) {
+                    continueSaved()
+                    resume()
+                } else {
+                    say(Phrases.NOTHING_TO_RESUME) { listenHome() }
+                }
+            MenuChoice.Rules -> say(Phrases.MENU_RULES) { listenHome() }
+            MenuChoice.Unknown -> if (!homeNudged && text.isNotBlank()) {
+                homeNudged = true
+                say(Phrases.MENU_RETRY) { listenHome() }
+            } else {
+                listenHome()
+            }
+        }
+    }
+
+    /** 음성으로 게임만 말했을 때 쓸 난이도: 화면에서 그 게임을 골라 둔 난이도, 아니면 쉬움 */
+    private fun difficultyFor(kind: GameKind): Difficulty =
+        _ui.value.menuDifficulty.takeIf { _ui.value.menuKind == kind && it in kind.difficulties } ?: Difficulty.EASY
+
+    fun onAppStarted() {
+        foreground = true
+        startHomeVoice()
+    }
 
     // ── 판 시작·복원 ─────────────────────────────────────────
 
@@ -144,7 +259,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
         stopVoice()
         focus.acquire()
         game = WordGame.start(kind, difficulty, vehicle.currentMode(), dictionary, rules = rules, brand = brandRoundFor(kind), planner = planner)
-        _ui.update { it.copy(screen = Screen.PLAYING, log = emptyList(), lastReward = 0, notice = null) }
+        _ui.update {
+            it.copy(screen = Screen.PLAYING, log = emptyList(), lastReward = 0, notice = null, ask = Ask.NONE, menuKind = kind, menuDifficulty = difficulty)
+        }
         publish()
         if (kind !in save.rulesOffered) {
             updateSave { copy(rulesOffered = rulesOffered + kind) }
@@ -262,14 +379,19 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (text.isBlank() || busy) return
         stt.cancel()
         listenToken++
+        if (game == null) return onHomeUtterance(text)
         onUtterance(listOf(text), game?.state?.turn)
     }
+
+    /** 질문에 대한 마지막 대답 원문(다음 판 질문에서 게임 이름을 찾는다) */
+    private var lastHeard: String? = null
 
     private fun onUtterance(candidates: List<String>, turn: Int?) {
         DebugLog.d(TAG) { "heard: $candidates ask=${_ui.value.ask}" }
         val g = game ?: return
         if (busy) return
         val top = candidates.first()
+        lastHeard = top
         log(true, top)
         // 명령어처럼 들려도 지금 차례에 맞는 답(예: 초성 ㅍㄱ 판의 "포기")일 때만 답으로 본다.
         // STT 후보 중 하나라도 맞는 답이면(["포기", "고기"]의 "고기") 명령보다 답을 우선한다.
@@ -489,12 +611,14 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (ask == Ask.NONE) return
         stt.cancel()
         listenToken++
+        lastHeard = null
         answerAsk(ask, ParsedUtterance.Command(if (yes) VoiceCommand.YES else VoiceCommand.NO))
     }
 
     private fun answerAsk(ask: Ask, parsed: ParsedUtterance) {
         DebugLog.d(TAG) { "answer $ask <- $parsed" }
         val command = (parsed as? ParsedUtterance.Command)?.command
+        if (ask == Ask.NEXT_LEVEL || ask == Ask.PLAY_AGAIN) return answerNext(ask, command)
         val yes = command == VoiceCommand.YES || (ask == Ask.RESUME && command == VoiceCommand.RESUME) ||
             (ask == Ask.CONCEDE && command == VoiceCommand.GIVE_UP) ||
             (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT)
@@ -521,8 +645,31 @@ class GameController(app: Application) : AndroidViewModel(app) {
             } else {
                 repeatPrompt(Phrases.KEEP_GOING)
             }
-            Ask.NONE -> Unit
+            Ask.NONE, Ask.NEXT_LEVEL, Ask.PLAY_AGAIN -> Unit
         }
+    }
+
+    /** 판이 끝난 뒤 다음 판 질문의 대답. "초성 대결 하자"·"쉽게"처럼 다른 걸 말해도 그대로 따른다. */
+    private fun answerNext(ask: Ask, command: VoiceCommand?) {
+        val s = game?.state ?: return
+        val levels = s.kind.difficulties
+        val menu = (lastHeard ?: "").let { MenuParser.parse(it) }
+        val target: Pair<GameKind, Difficulty>? = when {
+            menu is MenuChoice.Start -> menu.kind to (menu.difficulty ?: Difficulty.EASY.takeIf { menu.kind != s.kind } ?: s.difficulty)
+            command == VoiceCommand.EASIER -> s.kind to (levels.getOrNull(levels.indexOf(s.difficulty) - 1) ?: s.difficulty)
+            command == VoiceCommand.HARDER -> s.kind to (levels.getOrNull(levels.indexOf(s.difficulty) + 1) ?: s.difficulty)
+            command == VoiceCommand.YES -> s.kind to (if (ask == Ask.NEXT_LEVEL) suggestedNext() ?: s.difficulty else s.difficulty)
+            else -> null
+        }
+        if (target != null) {
+            _ui.update { it.copy(ask = Ask.NONE) }
+            return start(target.first, target.second)
+        }
+        if (command == VoiceCommand.NO || command == VoiceCommand.QUIT) {
+            _ui.update { it.copy(ask = Ask.NONE) }
+            return say(Phrases.SEE_YOU) { goHome() }
+        }
+        say(Phrases.YES_OR_NO) { listenForAnswer() }
     }
 
     private fun giveHint() {
@@ -648,6 +795,20 @@ class GameController(app: Application) : AndroidViewModel(app) {
         say(line) {
             _ui.update { it.copy(screen = Screen.RESULT, mic = Mic.OFF) }
             focus.release()
+            offerNext(s.outcome ?: Outcome.VOID)
+        }
+    }
+
+    /**
+     * 판이 끝나면 다음 판을 묻는다: 이기면 "한 단계 어렵게 해 볼까요?"(가장 어려운 단계면 "한 판 더 할까요?"),
+     * 지면 "한 판 더 할까요?". 사용자가 "그만"으로 끝낸 판은 더 묻지 않고 처음 화면으로 간다.
+     */
+    private fun offerNext(outcome: Outcome) {
+        lastHeard = null
+        when {
+            outcome == Outcome.VOID -> goHome()
+            outcome == Outcome.WIN && suggestedNext() != null -> ask(Ask.NEXT_LEVEL, Phrases.askNextLevel(suggestedNext()!!))
+            else -> ask(Ask.PLAY_AGAIN, Phrases.PLAY_AGAIN)
         }
     }
 
@@ -672,14 +833,20 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     // ── 보관함 ─────────────────────────────────────────────
 
-    fun openLocker() = _ui.update { it.copy(screen = Screen.LOCKER) }
+    fun openLocker() {
+        stopVoice()
+        _ui.update { it.copy(screen = Screen.LOCKER) }
+    }
 
     fun goHome() {
         stopVoice()
         game?.takeIf { !it.isFinished }?.let { it.pause(now()); persist() }
         game = null
         focus.release()
+        homeNudged = false
         _ui.update { it.copy(screen = Screen.HOME, ask = Ask.NONE, notice = null) }
+        // 처음 화면에서는 마이크를 계속 켜 둔다(다시 묻지는 않음)
+        startHomeVoice()
     }
 
     /** 시연용 쿠폰 교환. 실제 쿠폰은 발급되지 않는다. */
@@ -717,6 +884,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     /** 화면이 꺼지거나 앱이 내려갈 때 남은 시간을 저장해 둔다. */
     fun onAppStopped() {
+        foreground = false
+        if (game == null) stopVoice()
         game?.takeIf { !it.isFinished }?.let {
             pause(byAudioFocus = false)
         }

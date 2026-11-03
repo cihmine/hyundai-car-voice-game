@@ -40,6 +40,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        controller.onAppStarted()
+    }
+
     override fun onStop() {
         super.onStop()
         // 화면 회전 같은 구성 변경은 제외하고, 실제로 앱이 내려갈 때만 판을 멈추고 저장한다.

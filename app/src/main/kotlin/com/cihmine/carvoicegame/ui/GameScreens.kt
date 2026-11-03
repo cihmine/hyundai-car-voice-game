@@ -96,11 +96,20 @@ private fun SimulationBanner(ui: GameUi) {
 
 @Composable
 private fun HomeScreen(ui: GameUi, c: GameController) {
-    var kind by remember { mutableStateOf(GameKind.WORD_CHAIN) }
-    var difficulty by remember { mutableStateOf(Difficulty.EASY) }
+    val kind = ui.menuKind
+    val difficulty = ui.menuDifficulty
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text("말게임", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         Text("말로 하는 차량용 게임", style = MaterialTheme.typography.titleMedium)
+        Text(
+            when (ui.mic) {
+                Mic.SPEAKING -> "🔊 어떤 게임을 시작할까요?"
+                Mic.LISTENING -> "🎤 듣고 있어요 — \"끝말잇기\", \"초성 대결 어렵게\"처럼 말해 보세요"
+                Mic.OFF -> if (!ui.micGranted) "마이크 권한이 없어 화면에서 골라 주세요" else "화면에서 골라 주세요"
+            },
+            fontSize = 20.sp,
+            color = Color(0xFFFFD54F),
+        )
 
         val saved = ui.save.wordGame?.takeIf { it.outcome == null }
         if (saved != null) {
@@ -118,7 +127,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
                 val ready = k.isWordGame
                 FilterChip(
                     selected = kind == k,
-                    onClick = { if (ready) kind = k },
+                    onClick = { c.selectKind(k) },
                     enabled = ready,
                     label = { Text(if (ready) k.label else "${k.label} (준비 중)", fontSize = 18.sp) },
                 )
@@ -127,7 +136,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
         Text("난이도", style = MaterialTheme.typography.titleLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             kind.difficulties.forEach { d ->
-                FilterChip(selected = difficulty == d, onClick = { difficulty = d }, label = { Text(d.label, fontSize = 18.sp) })
+                FilterChip(selected = difficulty == d, onClick = { c.selectDifficulty(d) }, label = { Text(d.label, fontSize = 18.sp) })
             }
         }
         if (kind == GameKind.WORD_CHAIN) {
@@ -256,6 +265,15 @@ private fun ResultScreen(ui: GameUi, c: GameController) {
             if (ui.lastReward > 0) "+${ui.lastReward} 포인트 (잔액 ${ui.save.ledger.balance}P)" else "이번 판 보상 없음",
             fontSize = 22.sp,
         )
+        // 판이 끝나면 음성으로 다음 판을 묻는다 — 지금 무엇을 묻고 있는지 화면에도 보여 준다
+        val question = when (ui.ask) {
+            Ask.NEXT_LEVEL -> next?.let { "한 단계 어렵게, ${it.label} 단계로 해 볼까요?" }
+            Ask.PLAY_AGAIN -> "한 판 더 할까요?"
+            else -> null
+        }
+        if (question != null) {
+            Text("🎤 $question  — \"네\" / \"아니요\" / \"초성 대결 하자\"처럼 말해도 돼요", fontSize = 20.sp, color = Color(0xFFFFD54F))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = { c.start(round.kind, round.difficulty) }, Modifier.height(64.dp)) {
                 Text("같은 난이도로 다시", fontSize = 20.sp)

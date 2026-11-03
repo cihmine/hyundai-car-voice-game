@@ -64,6 +64,21 @@ object Phrases {
     const val OFFER_HINT = "시간이 다 됐어요. 힌트를 들을까요?"
     const val ASK_QUIT = "게임을 그만할까요?"
     const val ASK_RESUME = "다시 이어서 할까요?"
+    // ── 처음 화면·판 끝 ──
+    fun menuQuestion(hasSaved: Boolean) = "어떤 게임을 시작할까요? 끝말잇기, 초성 대결이 있어요." +
+        if (hasSaved) " 멈춘 판을 이어 하려면 '이어서'라고 말씀해 주세요." else ""
+
+    fun notReady(kind: GameKind) = "${withTopic(kind.label)} 아직 준비 중이에요. 끝말잇기나 초성 대결은 어때요?"
+
+    const val MENU_RETRY = "끝말잇기, 초성 대결 중에 말씀해 주세요."
+    const val MENU_RULES = "끝말잇기는 앞 단어의 끝 글자로 시작하는 단어를 번갈아 말해요. 초성 대결은 정해진 초성에 맞는 두 글자 단어를 번갈아 말해요. 어떤 게임을 할까요?"
+    const val NOTHING_TO_RESUME = "이어 할 판이 없어요. 끝말잇기, 초성 대결 중에 골라 주세요."
+
+    fun askNextLevel(next: Difficulty) = "한 단계 어렵게, ${next.label} 단계로 해 볼까요?"
+
+    const val PLAY_AGAIN = "한 판 더 할까요?"
+    const val SEE_YOU = "알겠어요. 다음에 또 해요."
+
     const val YES_OR_NO = "네 또는 아니요로 말씀해 주세요."
     const val SAY_AGAIN = "다시 말씀해 주세요."
     const val KEEP_GOING = "계속할게요."
