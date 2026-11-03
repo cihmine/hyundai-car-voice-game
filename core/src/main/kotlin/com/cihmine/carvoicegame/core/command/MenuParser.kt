@@ -24,6 +24,9 @@ sealed interface MenuChoice {
     /** "나중에", "그만", "안 할래" — 지금은 안 함(마이크는 계속 켜 둔다) */
     data object Later : MenuChoice
 
+    /** "꺼", "앱 꺼 줘", "종료" — 앱을 닫는다 */
+    data object Exit : MenuChoice
+
     data object Unknown : MenuChoice
 }
 
@@ -45,7 +48,8 @@ object MenuParser {
     )
     private val ANY = listOf("아무거나", "아무게임", "네가골라", "니가골라", "너가골라", "알아서", "추천해")
     private val RESUME = listOf("이어서", "이어하기", "이어할래", "하던거", "아까하던")
-    private val LATER = listOf("나중에", "그만", "안할래", "안해", "됐어", "종료")
+    private val LATER = listOf("나중에", "그만", "안할래", "안해", "됐어")
+    private val EXIT = listOf("종료", "끝내", "앱꺼", "꺼줘", "나갈래", "나가자")
     private val RULES = listOf("규칙", "무슨게임", "뭐있어", "뭐가있어", "어떤게임있어", "게임뭐있어")
 
     fun parse(utterance: String): MenuChoice {
@@ -61,6 +65,7 @@ object MenuParser {
             RESUME.any { it in text } -> MenuChoice.Resume
             ANY.any { it in text } -> MenuChoice.Any
             RULES.any { it in text } -> MenuChoice.Rules
+            text == "꺼" || text == "꺼라" || EXIT.any { it in text } -> MenuChoice.Exit
             LATER.any { it in text } -> MenuChoice.Later
             else -> MenuChoice.Unknown
         }

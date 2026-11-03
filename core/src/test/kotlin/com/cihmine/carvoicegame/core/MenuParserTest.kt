@@ -42,6 +42,11 @@ class MenuParserTest {
         assertEquals(MenuChoice.Later, MenuParser.parse("나중에 할래"))
         assertEquals(MenuChoice.Later, MenuParser.parse("그만"))
         assertEquals(MenuChoice.Later, MenuParser.parse("안 할래"))
+        // 앱 닫기
+        assertEquals(MenuChoice.Exit, MenuParser.parse("꺼"))
+        assertEquals(MenuChoice.Exit, MenuParser.parse("앱 꺼 줘"))
+        assertEquals(MenuChoice.Exit, MenuParser.parse("종료"))
+        assertEquals(MenuChoice.Exit, MenuParser.parse("게임 끝내자"))
         // 게임 이름이 같이 있으면 게임이 우선
         assertEquals(MenuChoice.Start(GameKind.WORD_CHAIN, null), MenuParser.parse("그만하고 끝말잇기 하자"))
     }

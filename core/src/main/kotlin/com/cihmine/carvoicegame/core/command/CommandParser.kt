@@ -40,12 +40,15 @@ class CommandParser(private val personal: Map<String, VoiceCommand> = emptyMap()
         personal[text]?.let { return ParsedUtterance.Command(it) }
         BUILT_IN[text]?.let { return ParsedUtterance.Command(it) }
         RATE.matchEntire(text)?.let { return ParsedUtterance.SetSpeechRate(it.groupValues[1].toInt()) }
+        // "종료하자", "게임 끝내자", "이제 그만할게요"처럼 정해진 문장이 아니어도 그만두는 말이면 종료로 본다(짧은 말만)
+        if (text.length <= 10 && QUIT_STEMS.any { it in text }) return ParsedUtterance.Command(VoiceCommand.QUIT)
         if (text in AMBIGUOUS_QUIT) return ParsedUtterance.ConfirmQuit
         return ParsedUtterance.NotCommand
     }
 
     companion object {
         private val RATE = Regex("(?:말|안내)?속도(\\d{2,3})(?:퍼센트|%)(?:로)?(?:해줘|해)?")
+        private val QUIT_STEMS = listOf("종료", "그만하", "그만할", "그만두", "끝내", "끝낼", "게임끝")
         private val AMBIGUOUS_QUIT = setOf("아됐다", "됐다", "됐어", "아됐어", "그냥됐어")
 
         private val BUILT_IN: Map<String, VoiceCommand> = buildMap {

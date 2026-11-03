@@ -132,6 +132,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
     private var ticker: Job? = null
     private var pausedByAudioFocus = false
 
+    /** "꺼", "종료" — 화면(액티비티)이 받아서 앱을 닫는다 */
+    val closeRequests = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
     /** 앱을 켠 뒤 아직 "어떤 게임을 시작할까요?"를 묻지 않음(한 번만 묻는다) */
     private var homePromptPending = true
 
@@ -260,6 +263,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 }
             MenuChoice.Rules -> say(Phrases.MENU_RULES) { listenHome() }
             // "됐어" 같은 말은 차 안 대화에도 흔하다 — 처음 한 번만 대답하고 그 뒤로는 조용히 듣는다
+            MenuChoice.Exit -> say(Phrases.SEE_YOU) { closeRequests.tryEmit(Unit) }
             MenuChoice.Later -> if (!homeNudged) {
                 homeNudged = true
                 say(Phrases.MENU_LATER) { listenHome() }

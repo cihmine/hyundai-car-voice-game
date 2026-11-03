@@ -7,6 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -28,6 +30,8 @@ class MainActivity : ComponentActivity() {
         val granted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         controller.setMicGranted(granted)
         if (!granted) micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        // 처음 화면에서 "꺼", "종료"라고 하면 앱을 닫는다
+        lifecycleScope.launch { controller.closeRequests.collect { finish() } }
         setContent {
             // 차량 화면(가로 1200dp 이상, 저밀도)은 같은 dp 로는 글씨가 작아 전체를 키운다.
             val base = LocalDensity.current

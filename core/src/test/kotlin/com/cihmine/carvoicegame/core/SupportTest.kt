@@ -46,6 +46,17 @@ class SupportTest {
     }
 
     @Test
+    fun `정해진 문장이 아니어도 그만두는 짧은 말은 종료(실기 시험에서 '종료하자'를 단어로 오인)`() {
+        val parser = CommandParser()
+        val quit = ParsedUtterance.Command(VoiceCommand.QUIT)
+        listOf("종료하자", "게임 끝내자", "이제 그만할게요", "그만두자").forEach { assertEquals(quit, parser.parse(it), it) }
+        // 지금 차례에 맞는 단어면 답으로 본다(예: '끝내기')
+        assertEquals(ParsedUtterance.NotCommand, parser.parse("끝내기", isGameAnswer = { it == "끝내기" }))
+        // 긴 문장은 종료로 보지 않는다
+        assertEquals(ParsedUtterance.NotCommand, parser.parse("종료 버튼이 어디 있는지 모르겠는데 알려줄래"))
+    }
+
+    @Test
     fun `안내 속도는 범위 안에서 조절한다`() {
         assertEquals(120, SpeechRate.faster(100))
         assertEquals(200, SpeechRate.faster(195))
