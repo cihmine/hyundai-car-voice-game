@@ -38,8 +38,14 @@ export function toEntries(items, { exactWord } = {}) {
     const senses = Array.isArray(item.sense) ? item.sense : [item.sense].filter(Boolean);
     const noun = senses.find((x) => x.pos === "명사" && x.definition);
     if (!noun) continue;
-    const meaning = shortMeaning(noun.definition);
-    if (!meaning || meaning.includes(word) || isUnsuitable(word, meaning)) continue;
+    let meaning = shortMeaning(noun.definition);
+    if (!meaning || isUnsuitable(word, meaning)) continue;
+    // 힌트가 정답을 말하지 않게 한다. 시작 글자 검색은 그런 단어를 빼고, 정확 검색(사용자 답 확인)은 가려서 돌려준다
+    // (가자미 → "가자밋과의 바닷물고기" 때문에 사용자 답이 인정되지 않았다).
+    if (meaning.includes(word.slice(0, -1))) {
+      if (!exactWord) continue;
+      meaning = meaning.split(word.slice(0, -1)).join("○○");
+    }
     const rank = out.length;
     out.push({ word, level: rank < 10 ? 1 : rank < 20 ? 2 : 3, meaning });
     seen.add(word);

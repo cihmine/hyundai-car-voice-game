@@ -47,6 +47,37 @@ class DictionaryDataTest {
     }
 
     @Test
+    fun `판정 전용 목록은 정렬돼 있고 한글 두~네 글자이며 부적절한 말이 없다`() {
+        val words = WordDictionary.acceptWords()
+        assertTrue(words.size > 50_000, "판정 전용 단어 수: ${words.size}")
+        assertTrue(words.zipWithNext().all { (a, b) -> a < b }, "정렬·중복 오류 — 이진 탐색이 깨진다")
+        assertTrue(words.all { it.length in 2..4 && it.all(Hangul::isSyllable) })
+        val badParts = listOf("좆", "씹", "병신", "지랄", "개새", "창녀", "니미", "불알", "보지", "자지")
+        val bad = words.filter { w -> badParts.any { it in w } }
+        assertTrue(bad.isEmpty(), "부적절: $bad")
+    }
+
+    @Test
+    fun `실기 시험에서 거절됐던 흔한 말을 서버 없이 인정한다`() {
+        val dictionary = WordDictionary.loadSample()
+        val missing = listOf("구형", "구더기", "소고기", "타악기", "조폐", "강화", "가자미", "컴퓨터", "스마트폰", "삼겹살", "떡볶이")
+            .filterNot(dictionary::accepts)
+        assertTrue(missing.isEmpty(), "거절됨: $missing")
+        assertTrue(!dictionary.accepts("가나다바")) // 가나다라는 우리말샘 표제어라 예시로 못 쓴다
+    }
+
+    @Test
+    fun `판정 전용 단어는 AI 후보에 들어가지 않는다`() {
+        val dictionary = WordDictionary.loadSample()
+        val aiWords = dictionary.entries.mapTo(HashSet()) { it.word }
+        val acceptOnly = WordDictionary.acceptWords().first { it !in aiWords }
+        assertTrue(dictionary.accepts(acceptOnly))
+        assertTrue(dictionary.lookup(acceptOnly) == null)
+        assertTrue(dictionary.startingWith(setOf(acceptOnly.first())).none { it.word == acceptOnly })
+        assertTrue(dictionary.plus(listOf(WordEntry("테스트말", 1, "시험"))).accepts(acceptOnly), "판 중 단어를 더해도 목록이 유지돼야 한다")
+    }
+
+    @Test
     fun `모든 단어는 두 글자 이상 한글이고 난이도는 1~3`() {
         val bad = raw.filter { (_, e) -> e.word.length < 2 || !e.word.all(Hangul::isSyllable) || e.level !in 1..3 }
         assertTrue(bad.isEmpty(), "형식 오류: ${bad.map { "${it.first}: ${it.second.word}" }}")

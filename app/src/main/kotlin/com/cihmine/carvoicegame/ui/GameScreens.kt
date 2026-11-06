@@ -104,7 +104,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
     val difficulty = ui.menuDifficulty
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text("말게임", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-        Text("말로 하는 차량용 게임", style = MaterialTheme.typography.titleMedium)
+        Text("주차·충전 중에 AI 와 말로 하는 끝말잇기·초성 대결", style = MaterialTheme.typography.titleMedium)
         Text(
             when (ui.mic) {
                 Mic.SPEAKING -> "🔊 어떤 게임을 시작할까요?"
@@ -193,7 +193,7 @@ private fun PlayingScreen(ui: GameUi, c: GameController) {
             )
             Text("제 단어", style = MaterialTheme.typography.titleMedium)
             // 규칙 안내를 묻는 동안에는 첫 단어를 아직 말하지 않았으므로 가린다.
-            Text(if (ui.ask == Ask.RULES) "…" else round.lastAiWord ?: "", fontSize = 72.sp, fontWeight = FontWeight.Bold)
+            Text(round.lastAiWord ?: "", fontSize = 72.sp, fontWeight = FontWeight.Bold)
 
             Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Text(timerText(ui), fontSize = 28.sp)
@@ -202,14 +202,6 @@ private fun PlayingScreen(ui: GameUi, c: GameController) {
             Text("힌트 ${round.hintsLeft}번 남음 · 사용한 단어 ${round.used.size}개 · 내 단어 ${round.validUserWords}개")
             ui.notice?.let { Text(it, color = MaterialTheme.colorScheme.tertiary, fontSize = 20.sp) }
 
-            if (ui.ask != Ask.NONE) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Button(onClick = { c.answer(true) }, Modifier.height(64.dp).width(140.dp)) { Text("네", fontSize = 22.sp) }
-                    OutlinedButton(onClick = { c.answer(false) }, Modifier.height(64.dp).width(140.dp)) {
-                        Text("아니요", fontSize = 22.sp)
-                    }
-                }
-            }
             // 화면 폭에 따라 버튼이 넘치지 않게 줄을 바꾼다.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (round.paused) {
@@ -269,14 +261,9 @@ private fun ResultScreen(ui: GameUi, c: GameController) {
             if (ui.lastReward > 0) "+${ui.lastReward} 포인트 (잔액 ${ui.save.ledger.balance}P)" else "이번 판 보상 없음",
             fontSize = 22.sp,
         )
-        // 판이 끝나면 음성으로 다음 판을 묻는다 — 지금 무엇을 묻고 있는지 화면에도 보여 준다
-        val question = when (ui.ask) {
-            Ask.NEXT_LEVEL -> next?.let { "한 단계 어렵게, ${it.label} 단계로 해 볼까요?" }
-            Ask.PLAY_AGAIN -> "한 판 더 할까요?"
-            else -> null
-        }
-        if (question != null) {
-            Text("🎤 $question  — \"네\" / \"아니요\" / \"초성 대결 하자\"처럼 말해도 돼요", fontSize = 20.sp, color = Color(0xFFFFD54F))
+        // 판이 끝나면 음성으로 다음 게임을 듣는다 — 화면에도 보여 준다
+        if (ui.ask == Ask.NEXT) {
+            Text("🎤 다음은 어떤 게임을 할까요?", fontSize = 20.sp, color = Color(0xFFFFD54F))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Button(onClick = { c.start(round.kind, round.difficulty) }, Modifier.height(64.dp)) {

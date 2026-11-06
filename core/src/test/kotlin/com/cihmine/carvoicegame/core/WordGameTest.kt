@@ -38,10 +38,46 @@ class WordGameTest {
         WordGameState(
             roundId = "r1", kind = GameKind.WORD_CHAIN, difficulty = difficulty, mode = mode,
             used = used, lastAiWord = lastAiWord, hintsLeft = RuleConfig.DEFAULT.hintsFor(difficulty),
-            clock = RuleConfig.DEFAULT.clockFor(mode),
+            clock = TEN_SECOND_RULES.clockFor(mode),
         ),
-        dictionary, Random(seed),
+        dictionary, Random(seed), rules = TEN_SECOND_RULES,
     ).also { it.resume() }
+
+    @Test
+    fun `잘못 들린 말은 자음이나 모음 하나 차이면 답으로 고쳐 인정한다`() {
+        val game = chainGame("사과")
+        assertEquals(TurnResult.Accepted("과자", "자석", heardAs = "가자"), game.submit(listOf("가자"), now = 0))
+    }
+
+    @Test
+    fun `숫자로 잘못 들린 초성 답을 살린다 - 94 는 구사, 구사는 부사`() {
+        val game = WordGame.restore(
+            WordGameState(
+                roundId = "r1", kind = GameKind.CHOSEONG, difficulty = Difficulty.EASY, mode = PlayMode.PARKED,
+                choseong = "ㅂㅅ", used = listOf("복사"), lastAiWord = "복사", hintsLeft = 2,
+                clock = RuleConfig.DEFAULT.clockFor(PlayMode.PARKED),
+            ),
+            WordDictionary.loadSample(), Random(1),
+        ).also { it.resume() }
+        val result = assertIs<TurnResult.Accepted>(game.submit(listOf("94"), now = 0))
+        assertEquals("부사", result.userWord)
+        assertEquals("구사", result.heardAs)
+    }
+
+    @Test
+    fun `이미 나온 단어를 다시 말하면 비슷한 말로 고치지 않는다`() {
+        val game = chainGame("사과", used = listOf("사과", "과자", "자석", "석과"))
+        assertEquals(TurnResult.Rejected("과자", RejectReason.ALREADY_USED), game.submit(listOf("과자"), now = 0))
+    }
+
+    @Test
+    fun `같은 차례에 힌트를 또 받으면 다른 단어를 설명한다`() {
+        val dictionary = WordDictionary(listOf(WordEntry("사과", 1, "과일"), WordEntry("과자", 1, "간식"), WordEntry("과일", 1, "열매")))
+        val game = chainGame("사과", dictionary = dictionary)
+        val first = assertIs<HintResult.Hint>(game.requestHint(0))
+        val second = assertIs<HintResult.Hint>(game.requestHint(1))
+        assertTrue(first.meaning != second.meaning)
+    }
 
     @Test
     fun `맞는 단어를 인정하고 AI 가 이어 말한다`() {
@@ -86,11 +122,11 @@ class WordGameTest {
     fun `사전에 없는 말은 먼저 재확인하고 같은 말이 또 오면 오답`() {
         val game = chainGame("사과")
         game.speechFinished(0)
-        assertEquals(TurnResult.Reconfirm("과짜"), game.submit(listOf("과짜"), now = 3_000))
+        assertEquals(TurnResult.Reconfirm("과묵"), game.submit(listOf("과묵"), now = 3_000))
         assertEquals(7_000, game.state.clock.remaining(9_000), "재확인 중에는 시간이 줄지 않는다")
         game.speechFinished(9_000)
-        val second = game.submit(listOf("과짜"), now = 10_000)
-        assertEquals(TurnResult.Rejected("과짜", RejectReason.NOT_IN_DICTIONARY), second)
+        val second = game.submit(listOf("과묵"), now = 10_000)
+        assertEquals(TurnResult.Rejected("과묵", RejectReason.NOT_IN_DICTIONARY), second)
     }
 
     @Test

@@ -30,9 +30,9 @@ class ReviewRegressionTest {
         WordGameState(
             roundId = "r1", kind = GameKind.WORD_CHAIN, difficulty = difficulty, mode = mode,
             used = listOf(lastAiWord), lastAiWord = lastAiWord, hintsLeft = RuleConfig.DEFAULT.hintsFor(difficulty),
-            clock = RuleConfig.DEFAULT.clockFor(mode),
+            clock = TEN_SECOND_RULES.clockFor(mode),
         ),
-        dictionary, Random(1),
+        dictionary, Random(1), rules = TEN_SECOND_RULES,
     ).also { it.resume() }
 
     @Test

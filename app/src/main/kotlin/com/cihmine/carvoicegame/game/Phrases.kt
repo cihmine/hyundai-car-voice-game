@@ -22,8 +22,6 @@ object Phrases {
         return word + if (hasFinal) "은" else "는"
     }
 
-    fun askRules(kind: GameKind) = "${withTopic(kind.label)} 처음이시네요. 규칙을 들어 볼까요?"
-
     fun rules(kind: GameKind, rules: RuleConfig): String {
         val limit = rules.parkedLimitMs / 1000
         val common = "같은 단어는 한 판에 한 번만 쓸 수 있어요. 틀리면 이유를 알려 드리고 다시 기회를 드려요. " +
@@ -51,19 +49,32 @@ object Phrases {
 
     fun reconfirm(heard: String?) =
         if (heard == null) "잘 못 들었어요. 다시 말씀해 주세요."
-        else "$heard, 라고 하셨나요? 제 단어장에서 찾지 못했어요. 맞으면 한 번 더, 아니면 다시 말씀해 주세요."
+        else "제 단어장에 없는 말이에요. 다른 단어로 말씀해 주세요."
+
+    /** 비슷한 소리로 고쳐 인정했을 때 어떤 단어로 받았는지 알려 준다("잘못 들었어"로 되돌릴 수 있다) */
+    fun heardAs(word: String): String {
+        val jong = word.last().let { if (it in '가'..'힣') (it - '가') % 28 else 0 }
+        return word + (if (jong == 0 || jong == 8) "로" else "으로") + " 들었어요. "
+    }
+
+    /** 틀린 답의 이유. 욕으로 잘못 들린 말은 소리 내어 읽지 않는다. */
+    fun rejected(word: String, reason: String): String {
+        val echo = if (PROFANE.any { it in word }) "" else "$word, "
+        return "$echo$reason. $SAY_AGAIN"
+    }
+
+    private val PROFANE = listOf("병신", "씨발", "시발", "지랄", "개새", "새끼", "좆", "존나")
 
     fun userWins(word: String, points: Int) =
         "$word! 이어 갈 단어가 생각나지 않네요. 제가 졌어요." + if (points > 0) " ${points}포인트를 드릴게요." else ""
 
-    const val ASK_CONCEDE = "이을 단어가 없는 것 같아요. 이번 판은 제가 이긴 걸로 할까요?"
+    const val NOT_UNDERSTOOD = "잘 못 알아들었어요. 단어 하나만 말씀해 주세요."
+    const val NO_WORD_LEFT = "이을 단어가 없네요. 이번 판은 제가 이겼어요. 다음엔 그 글자를 조심하세요."
     const val CONCEDED = "좋아요, 이번 판은 제가 이겼어요. 다음엔 그 글자를 조심하세요."
     const val VOIDED = "그만할게요. 이번 판은 무효로 하고 보상은 없어요."
     const val TIME_UP = "시간이 다 됐어요. 이번 판은 제가 이겼어요."
     const val GAVE_UP = "알겠어요. 이번 판은 제가 이겼어요."
-    const val OFFER_HINT = "시간이 다 됐어요. 힌트를 들을까요?"
-    const val ASK_QUIT = "게임을 그만할까요?"
-    const val ASK_RESUME = "다시 이어서 할까요?"
+    const val SAY_RESUME = "이어서 하려면 '이어서'라고 말씀해 주세요."
     // ── 처음 화면·판 끝 ──
     fun menuQuestion(hasSaved: Boolean) = "어떤 게임을 시작할까요? 끝말잇기, 초성 대결이 있어요." +
         if (hasSaved) " 멈춘 판을 이어 하려면 '이어서'라고 말씀해 주세요." else ""
@@ -75,12 +86,9 @@ object Phrases {
     const val MENU_LATER = "알겠어요. 하고 싶을 때 게임 이름을 말씀해 주세요."
     const val NOTHING_TO_RESUME = "이어 할 판이 없어요. 끝말잇기, 초성 대결 중에 골라 주세요."
 
-    fun askNextLevel(next: Difficulty) = "한 단계 어렵게, ${next.label} 단계로 해 볼까요?"
-
-    const val PLAY_AGAIN = "한 판 더 할까요?"
+    /** 판 끝. [harder] 는 이겼을 때 올릴 수 있는 단계 */
+    fun nextGame(harder: Difficulty?) = "다음은 어떤 게임을 할까요?" + (harder?.let { " ${it.label} 단계로 올려도 좋아요." } ?: "")
     const val SEE_YOU = "알겠어요. 다음에 또 해요."
 
-    const val YES_OR_NO = "네 또는 아니요로 말씀해 주세요."
     const val SAY_AGAIN = "다시 말씀해 주세요."
-    const val KEEP_GOING = "계속할게요."
 }

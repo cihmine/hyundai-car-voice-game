@@ -56,4 +56,30 @@ fun suggestNextDifficulty(kind: GameKind, current: Difficulty, outcome: Outcome)
 object Words {
     /** 띄어쓰기·문장부호를 없앤 비교용 형태 */
     fun normalize(raw: String): String = raw.filter { it.isLetterOrDigit() }.lowercase()
+
+    private const val DIGITS = "공일이삼사오육칠팔구"
+
+    /**
+     * 음성 인식이 "구사"를 "94"로, "오이"를 "52"로 적는 일이 있어 숫자를 읽는 말로 바꾼다.
+     * 한 자씩 읽기("구사")를 먼저, 숫자만 있으면 자리 읽기("구십사")를 그다음 후보로 낸다.
+     */
+    fun spokenForms(raw: String): List<String> {
+        val text = normalize(raw)
+        if (text.none { it in '0'..'9' }) return listOf(text)
+        val perDigit = text.map { if (it in '0'..'9') DIGITS[it - '0'] else it }.joinToString("")
+        return listOfNotNull(perDigit, positional(text)).distinct()
+    }
+
+    private fun positional(digits: String): String? {
+        if (digits.length > 4 || digits.first() == '0' || !digits.all { it in '0'..'9' }) return null
+        val units = listOf("", "십", "백", "천")
+        return digits.mapIndexed { i, c ->
+            val unit = units[digits.length - 1 - i]
+            when {
+                c == '0' -> ""
+                c == '1' && unit.isNotEmpty() -> unit
+                else -> "${DIGITS[c - '0']}$unit"
+            }
+        }.joinToString("")
+    }
 }

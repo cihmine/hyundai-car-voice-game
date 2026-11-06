@@ -56,6 +56,8 @@ data class WordGameState(
     val learned: List<WordEntry> = emptyList(),
     /** AI 의 직전 단어가 인터넷으로 확인한 한방 단어인지(어려움) */
     val lastAiHanbang: Boolean = false,
+    /** 이번 판에서 힌트로 설명한 단어. 같은 뜻풀이를 또 읽지 않게 한다. */
+    val hinted: List<String> = emptyList(),
 )
 
 /** 직전 판정을 되돌리기 위한 기록 */
@@ -82,8 +84,11 @@ enum class RejectReason(val message: String) {
 }
 
 sealed interface TurnResult {
-    /** 사용자 단어 인정. [aiWord] 가 null 이면 AI 가 더 잇지 못해 사용자 승리 */
-    data class Accepted(val userWord: String, val aiWord: String?) : TurnResult
+    /**
+     * 사용자 단어 인정. [aiWord] 가 null 이면 AI 가 더 잇지 못해 사용자 승리.
+     * [heardAs] 는 비슷한 소리로 고쳐 인정했을 때 실제로 들린 말이다.
+     */
+    data class Accepted(val userWord: String, val aiWord: String?, val heardAs: String? = null) : TurnResult
 
     /** 오답. 이유를 설명하고 다시 말하게 한다. 주차 모드면 남은 시간에 5초 추가 */
     data class Rejected(val word: String, val reason: RejectReason) : TurnResult
@@ -165,6 +170,7 @@ class WordGame private constructor(
         val normalized = normalize(candidates)
 
         normalized.firstOrNull { violation(it) == null }?.let { return accept(it, now) }
+        soundAlike(normalized)?.let { (heard, word) -> return accept(word, now, heardAs = heard) }
 
         val top = normalized.firstOrNull()
         if (top == null) {
@@ -222,7 +228,23 @@ class WordGame private constructor(
         lastAiHanbangBefore = state.lastAiHanbang,
     )
 
-    private fun accept(word: String, now: Long): TurnResult {
+    /**
+     * 음성 인식은 후보를 하나만 주고 자음·모음 하나를 자주 틀린다("부사"→"구사"). 규칙이나 사전에 걸린 말이면
+     * 자음이나 모음 하나만 다른 말 중 지금 답이 되는 단어를 찾는다. 흔한 단어를 먼저 고르고 브랜드 단어는 쓰지 않는다.
+     * 이미 나온 단어를 다시 말한 것은 오인식으로 보지 않는다.
+     */
+    private fun soundAlike(heard: List<String>): Pair<String, String>? {
+        for (word in heard) {
+            if (violation(word) !in RESCUABLE) continue
+            val best = Hangul.oneJamoVariants(word)
+                .filter { violation(it) == null && dictionary.lookup(it)?.isBrand != true }
+                .minWithOrNull(compareBy({ dictionary.lookup(it)?.familiarity ?: Int.MAX_VALUE }, { it }))
+            if (best != null) return word to best
+        }
+        return null
+    }
+
+    private fun accept(word: String, now: Long, heardAs: String? = null): TurnResult {
         val record = recordTurn(word, accepted = true, now)
         val used = state.used + word
         val (aiEntry, plan, hanbang) = chooseAiWord(used.toSet(), word)
@@ -234,7 +256,7 @@ class WordGame private constructor(
                     lastTurn = record,
                 )
             }
-            return TurnResult.Accepted(word, null)
+            return TurnResult.Accepted(word, null, heardAs)
         }
         update {
             copy(
@@ -252,7 +274,7 @@ class WordGame private constructor(
                 },
             )
         }
-        return TurnResult.Accepted(word, aiEntry.word)
+        return TurnResult.Accepted(word, aiEntry.word, heardAs)
     }
 
     /**
@@ -311,7 +333,7 @@ class WordGame private constructor(
         if (!acceptingAnswer()) return null
         val normalized = normalize(candidates)
         if (normalized.any { violation(it) == null }) return null
-        return normalized.firstOrNull { dictionary.lookup(it) == null && violation(it, checkDictionary = false) == null }
+        return normalized.firstOrNull { !dictionary.accepts(it) && violation(it, checkDictionary = false) == null }
     }
 
     /** [userWord] 를 인정한 뒤 AI 가 앱 사전으로 이을 단어가 없으면 인터넷에서 찾아볼 첫 글자들(어려움만) */
@@ -340,7 +362,7 @@ class WordGame private constructor(
     }
 
     private fun normalize(candidates: List<String>): List<String> =
-        candidates.map(Words::normalize).filter { it.isNotEmpty() }.map { aliases[it] ?: it }.distinct()
+        candidates.flatMap(Words::spokenForms).filter { it.isNotEmpty() }.map { aliases[it] ?: it }.distinct()
 
     /** "광고 꺼 줘". 바로 유도를 멈춘다. 이번 판의 허용 단어 목록과 포인트 규칙은 그대로다. */
     fun disableAds() {
@@ -349,9 +371,10 @@ class WordGame private constructor(
     }
 
     private fun violation(word: String, checkDictionary: Boolean = true): RejectReason? {
-        if (checkDictionary && dictionary.lookup(word) == null) return RejectReason.NOT_IN_DICTIONARY
+        // 규칙 위반(끝 글자·중복)을 사전보다 먼저 본다. 끝 글자가 틀린 말에 "단어장에 없어요, 맞으면 한 번 더"라고
+        // 되묻지 않게(실기 시험: '빨래' 다음 '에버랜드'를 되물은 뒤 거절).
         if (word in state.used) return RejectReason.ALREADY_USED
-        return when (state.kind) {
+        val rule = when (state.kind) {
             GameKind.WORD_CHAIN -> when {
                 word.length < 2 -> RejectReason.TOO_SHORT
                 word.first() !in Hangul.startCharsAfter(state.lastAiWord!!.last()) -> RejectReason.WRONG_START
@@ -364,6 +387,8 @@ class WordGame private constructor(
             }
             else -> error("단어 게임이 아님: ${state.kind}")
         }
+        if (rule != null) return rule
+        return if (checkDictionary && !dictionary.accepts(word)) RejectReason.NOT_IN_DICTIONARY else null
     }
 
     /** [previous] 다음에 말할 수 있는 단어들 */
@@ -395,11 +420,13 @@ class WordGame private constructor(
         if (isFinished || state.paused) return HintResult.NotAccepting
         if (state.hintsLeft <= 0) return HintResult.NoHintsLeft
         // 힌트로 광고 소개가 나가지 않도록 브랜드 단어는 고르지 않는다.
-        val target = optionsAfter(state.lastAiWord ?: return HintResult.NoCandidate, state.used.toSet())
-            .filter { !it.isBrand }.minByOrNull { it.familiarity } ?: return HintResult.NoCandidate
+        val options = optionsAfter(state.lastAiWord ?: return HintResult.NoCandidate, state.used.toSet())
+            .filter { !it.isBrand }
+        val target = (options.filter { it.word !in state.hinted }.ifEmpty { options }).minByOrNull { it.familiarity }
+            ?: return HintResult.NoCandidate
         update {
             copy(
-                hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER,
+                hintsLeft = hintsLeft - 1, phase = WordPhase.AWAIT_USER, hinted = hinted + target.word,
                 clock = clock.pause(now).restart(rules.hintExtensionMs),
             )
         }
@@ -484,6 +511,9 @@ class WordGame private constructor(
     }
 
     companion object {
+        /** 비슷한 소리로 고쳐 볼 판정 이유. 이미 나온 단어·글자 수 위반은 고치지 않는다. */
+        private val RESCUABLE = setOf(RejectReason.NOT_IN_DICTIONARY, RejectReason.WRONG_START, RejectReason.WRONG_CHOSEONG)
+
         /** 초성 대결로 출제할 초성의 최소 후보 단어 수 */
         const val MIN_CHOSEONG_POOL = 6
 

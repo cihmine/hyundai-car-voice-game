@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 디버그 빌드 전용: PC 에서 띄운 단어 검색 중계 서버(http://10.0.2.2:8787)로 시험할 수 있게 http 를 허용한다.
+     release 빌드에는 들어가지 않는다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+</manifest>

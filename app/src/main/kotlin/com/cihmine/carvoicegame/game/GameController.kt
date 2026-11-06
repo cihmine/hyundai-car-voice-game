@@ -42,6 +42,7 @@ import com.cihmine.carvoicegame.speech.Voice
 import com.cihmine.carvoicegame.speech.AudioFocus
 import com.cihmine.carvoicegame.vehicle.MockVehicleStatus
 import com.cihmine.carvoicegame.vehicle.VehicleState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -57,15 +58,15 @@ enum class Screen { HOME, PLAYING, RESULT, LOCKER }
 
 enum class Mic { OFF, SPEAKING, LISTENING }
 
-/** 예/아니요로 답을 기다리는 질문 */
+/** 대답을 기다리는 상태. 예/아니요로 묻는 질문은 두지 않는다(사용자 요청) — 바로 실행하거나 무엇을 할지만 듣는다. */
 enum class Ask {
-    NONE, RULES, HINT, QUIT, RESUME, CONCEDE,
+    NONE,
 
-    /** 이긴 뒤 "한 단계 어렵게 해 볼까요?" */
-    NEXT_LEVEL,
+    /** 멈춘 판을 '이어서'라고 말하길 기다린다 */
+    RESUME,
 
-    /** 진 뒤(또는 가장 어려운 단계에서 이긴 뒤) "한 판 더 할까요?" */
-    PLAY_AGAIN,
+    /** 판이 끝나고 다음 게임을 말하길 기다린다 */
+    NEXT,
 }
 
 data class LogLine(val fromUser: Boolean, val text: String)
@@ -113,6 +114,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private val rules = RuleConfig.DEFAULT
     private val dictionary = WordDictionary.loadSample()
+        .also { d -> viewModelScope.launch(Dispatchers.Default) { d.accepts("가") } } // 판정 전용 목록을 첫 답 전에 미리 읽어 둔다
     private val catalog = CampaignCatalog.loadDemo()
     private val planner = AdPlanner()
     private val online = OnlineDictionary.fromBuildConfig()
@@ -152,7 +154,6 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     /** AI 가 마지막 단어를 다 말한 시각과 그 차례(주행 중 한방에 막혔는지 판단) */
     private var aiSpokeAt: Long = 0
-    private var concedeOfferedTurn = -1
 
     private val save get() = _ui.value.save
     private val parser get() = CommandParser(save.personalCommands)
@@ -270,7 +271,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
             } else {
                 listenHome()
             }
-            MenuChoice.Unknown -> if (!homeNudged && text.isNotBlank()) {
+            // "소리가 안 들려", "뭐라고?" — 질문을 다시 한다
+            MenuChoice.Unknown -> if (parser.parse(text) == ParsedUtterance.Command(VoiceCommand.REPEAT)) {
+                say(Phrases.menuQuestion(save.wordGame?.takeIf { it.outcome == null } != null)) { listenHome() }
+            } else if (!homeNudged && text.isNotBlank()) {
                 homeNudged = true
                 say(Phrases.MENU_RETRY) { listenHome() }
             } else {
@@ -287,7 +291,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         foreground = true
         // 판 끝 질문 중에 내려갔다 돌아오면 그 질문의 대답을 다시 듣는다
         val ask = _ui.value.ask
-        if (_ui.value.screen == Screen.RESULT && (ask == Ask.NEXT_LEVEL || ask == Ask.PLAY_AGAIN)) return listenForAnswer()
+        if (_ui.value.screen == Screen.RESULT && ask == Ask.NEXT) return listenForAnswer()
         startHomeVoice()
     }
 
@@ -301,12 +305,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
             it.copy(screen = Screen.PLAYING, log = emptyList(), lastReward = 0, notice = null, ask = Ask.NONE, menuKind = kind, menuDifficulty = difficulty)
         }
         publish()
-        if (kind !in save.rulesOffered) {
-            updateSave { copy(rulesOffered = rulesOffered + kind) }
-            ask(Ask.RULES, Phrases.askRules(kind))
-        } else {
-            speakOpening()
-        }
+        speakOpening()
     }
 
     /**
@@ -398,13 +397,6 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (g.isFinished || g.state.paused || busy) return
         stt.cancel()
         listenToken++
-        // 질문 중에 누른 버튼은 그 질문의 답으로 처리한다(힌트 질문의 '힌트' = 네). 질문 상태와 판 상태가 갈라지지 않게.
-        val ask = _ui.value.ask
-        // 일시정지·그만은 질문 중에도 바로 실행한다(질문은 지우고, 재개하면 엔진이 다시 묻는다).
-        if (ask != Ask.NONE) {
-            if (command != VoiceCommand.PAUSE && command != VoiceCommand.QUIT) return answerAsk(ask, ParsedUtterance.Command(command))
-            _ui.update { it.copy(ask = Ask.NONE) }
-        }
         command(command)
     }
 
@@ -449,8 +441,13 @@ class GameController(app: Application) : AndroidViewModel(app) {
         when (parsed) {
             is ParsedUtterance.Command -> command(parsed.command)
             is ParsedUtterance.SetSpeechRate -> setRate(SpeechRate.set(parsed.percent))
-            ParsedUtterance.ConfirmQuit -> ask(Ask.QUIT, Phrases.ASK_QUIT)
-            ParsedUtterance.NotCommand -> judge(candidates, turn)
+            ParsedUtterance.ConfirmQuit -> voidRound()
+            // "뭘 뭐라고 했더라"처럼 문장인데 명령도 답도 아니면 오답으로 치지 않고 다시 말해 달라고 한다
+            ParsedUtterance.NotCommand -> if (CommandParser.looksLikeSentence(top) && g.acceptableWord(candidates) == null) {
+                repeatPrompt(Phrases.NOT_UNDERSTOOD)
+            } else {
+                judge(candidates, turn)
+            }
         }
     }
 
@@ -503,17 +500,22 @@ class GameController(app: Application) : AndroidViewModel(app) {
         val g = game ?: return
         when (val r = g.submit(candidates, now(), turn)) {
             is TurnResult.Accepted -> {
+                if (r.heardAs != null) {
+                    showUserCaption(r.userWord)
+                    log(true, r.userWord)
+                }
                 if (r.aiWord == null) {
                     val points = RewardPolicy.forResult(g.state.kind, g.state.difficulty, Outcome.WIN)
                     finishRound(Phrases.userWins(r.userWord, points))
                 } else {
                     persist()
-                    if (g.state.lastAiAdCampaignId != null) sayAdWord() else say(r.aiWord!!) { aiSpoke() }
+                    val lead = r.heardAs?.let { Phrases.heardAs(r.userWord) }.orEmpty()
+                    if (g.state.lastAiAdCampaignId != null) sayAdWord() else say(lead + r.aiWord!!) { aiSpoke() }
                 }
             }
             is TurnResult.Rejected -> {
                 persist()
-                say("${r.word}, ${r.reason.message}. ${Phrases.SAY_AGAIN}") { aiSpoke() }
+                say(Phrases.rejected(r.word, r.reason.message)) { aiSpoke() }
             }
             is TurnResult.Reconfirm -> say(Phrases.reconfirm(r.heard)) { aiSpoke() }
             TurnResult.NotAccepting -> listen()
@@ -535,6 +537,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 g.giveUp(now())
                 finishRound(Phrases.GAVE_UP)
             }
+            // "모르겠어" — 힌트가 남았으면 힌트, 없으면 이번 판을 끝낸다
+            VoiceCommand.STUCK -> if (g.state.hintsLeft > 0) giveHint() else concede(Phrases.CONCEDED)
+            VoiceCommand.REPEAT -> repeatPrompt(null)
             VoiceCommand.MISHEARD -> when (val c = g.correctLast(now())) {
                 is CorrectionResult.Undone -> {
                     persist()
@@ -625,11 +630,26 @@ class GameController(app: Application) : AndroidViewModel(app) {
         say("이번 판은 무효로 하고 ${next.label} 단계로 다시 시작할게요.") { start(s.kind, next) }
     }
 
-    // ── 질문(예/아니요) ─────────────────────────────────────
+    // ── 대답 기다리기 ───────────────────────────────────────
 
     private fun ask(ask: Ask, text: String) {
+        askText = text
+        askRepeated = false
         _ui.update { it.copy(ask = ask) }
         say(text) { listenForAnswer() }
+    }
+
+    /** 지금 기다리는 말의 안내(못 알아들으면 한 번 더 말한다) */
+    private var askText: String? = null
+    private var askRepeated = false
+
+    /**
+     * 대답을 못 알아들었을 때. 마이크를 계속 켜 두므로 상관없는 말마다 되묻지 않고, 처음 한 번만 다시 말한다.
+     */
+    private fun askAgainOnce() {
+        if (askRepeated) return listenForAnswer()
+        askRepeated = true
+        say(askText ?: "") { listenForAnswer() }
     }
 
     /** 질문 답을 듣는다. 질문 중에는 엔진이 답을 받지 않으므로 시간도 흐르지 않는다. */
@@ -658,62 +678,33 @@ class GameController(app: Application) : AndroidViewModel(app) {
         })
     }
 
-    /** 화면 버튼으로 예/아니요 */
-    fun answer(yes: Boolean) {
-        val ask = _ui.value.ask
-        if (ask == Ask.NONE) return
-        stt.cancel()
-        listenToken++
-        lastHeard = null
-        answerAsk(ask, ParsedUtterance.Command(if (yes) VoiceCommand.YES else VoiceCommand.NO))
-    }
-
     private fun answerAsk(ask: Ask, parsed: ParsedUtterance) {
         DebugLog.d(TAG) { "answer $ask <- $parsed" }
         val command = (parsed as? ParsedUtterance.Command)?.command
-        if (ask == Ask.NEXT_LEVEL || ask == Ask.PLAY_AGAIN) return answerNext(ask, command)
-        val yes = command == VoiceCommand.YES || (ask == Ask.RESUME && command == VoiceCommand.RESUME) ||
-            (ask == Ask.CONCEDE && command == VoiceCommand.GIVE_UP) ||
-            (ask == Ask.HINT && command == VoiceCommand.HINT) || (ask == Ask.QUIT && command == VoiceCommand.QUIT) ||
-            // "규칙 들어 볼까요?"에 "규칙 알려 줘"라고 답하면 네
-            (ask == Ask.RULES && command == VoiceCommand.RULES)
-        val no = command == VoiceCommand.NO
-        if (!yes && !no) return say(Phrases.YES_OR_NO) { listenForAnswer() }
-        _ui.update { it.copy(ask = Ask.NONE) }
-        val g = game ?: return
-        when (ask) {
-            Ask.RULES -> if (yes) say(Phrases.rules(g.state.kind, rules)) { speakOpening() } else speakOpening()
-            Ask.HINT -> when {
-                // 질문 사이 주행 전환 등으로 힌트 제안 상태가 아니면 판을 끝내지 않는다.
-                g.state.phase != WordPhase.OFFER_HINT -> repeatPrompt(null)
-                yes -> giveHint()
-                else -> {
-                    g.declineHint(now())
-                    finishRound(Phrases.TIME_UP)
-                }
+        if (ask == Ask.NEXT) return answerNext(command)
+        when (command) {
+            VoiceCommand.RESUME, VoiceCommand.YES -> resume()
+            VoiceCommand.QUIT -> {
+                _ui.update { it.copy(ask = Ask.NONE) }
+                voidRound()
             }
-            Ask.QUIT -> if (yes) voidRound() else repeatPrompt(Phrases.KEEP_GOING)
-            Ask.RESUME -> if (yes) resume() else _ui.update { it.copy(mic = Mic.OFF) }
-            Ask.CONCEDE -> if (yes) {
-                g.giveUp(now())
-                finishRound(Phrases.CONCEDED)
-            } else {
-                repeatPrompt(Phrases.KEEP_GOING)
-            }
-            Ask.NONE, Ask.NEXT_LEVEL, Ask.PLAY_AGAIN -> Unit
+            VoiceCommand.NO -> _ui.update { it.copy(ask = Ask.NONE, mic = Mic.OFF) }
+            else -> askAgainOnce()
         }
     }
 
-    /** 판이 끝난 뒤 다음 판 질문의 대답. "초성 대결 하자"·"쉽게"처럼 다른 걸 말해도 그대로 따른다. */
-    private fun answerNext(ask: Ask, command: VoiceCommand?) {
+    /** 판이 끝난 뒤 다음 판을 고르는 말. "초성 대결 하자"·"어렵게"·"한 판 더"를 그대로 따른다. */
+    private fun answerNext(command: VoiceCommand?) {
         val s = game?.state ?: return
         val levels = s.kind.difficulties
         val menu = (lastHeard ?: "").let { MenuParser.parse(it) }
         val target: Pair<GameKind, Difficulty>? = when {
             menu is MenuChoice.Start -> menu.kind to (menu.difficulty ?: Difficulty.EASY.takeIf { menu.kind != s.kind } ?: s.difficulty)
+            menu is MenuChoice.Unknown && MenuParser.difficultyIn(lastHeard ?: "")?.takeIf { it in levels } != null ->
+                s.kind to MenuParser.difficultyIn(lastHeard ?: "")!!
             command == VoiceCommand.EASIER -> s.kind to (levels.getOrNull(levels.indexOf(s.difficulty) - 1) ?: s.difficulty)
             command == VoiceCommand.HARDER -> s.kind to (levels.getOrNull(levels.indexOf(s.difficulty) + 1) ?: s.difficulty)
-            command == VoiceCommand.YES -> s.kind to (if (ask == Ask.NEXT_LEVEL) suggestedNext() ?: s.difficulty else s.difficulty)
+            command == VoiceCommand.YES -> s.kind to s.difficulty
             else -> null
         }
         if (target != null) {
@@ -724,14 +715,8 @@ class GameController(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(ask = Ask.NONE) }
             return say(Phrases.SEE_YOU) { goHome() }
         }
-        // 마이크를 계속 켜 두므로 상관없는 말마다 되묻지 않는다(한 번만 안내)
-        if (resultNudged) return listenForAnswer()
-        resultNudged = true
-        say(Phrases.YES_OR_NO) { listenForAnswer() }
+        askAgainOnce()
     }
-
-    /** 판 끝 질문에서 "네 또는 아니요로…"를 이미 한 번 말했는지 */
-    private var resultNudged = false
 
     private fun giveHint() {
         val g = game ?: return
@@ -739,10 +724,11 @@ class GameController(app: Application) : AndroidViewModel(app) {
         when (val h = g.requestHint(now())) {
             is HintResult.Hint -> {
                 persist()
-                say("힌트예요. ${h.meaning}. 남은 힌트는 ${h.hintsLeft}번이에요.") { aiSpoke() }
+                val lead = if (timedOut) "시간이 다 됐어요. " else ""
+                say("${lead}힌트예요. ${h.meaning}. 남은 힌트는 ${h.hintsLeft}번이에요.") { aiSpoke() }
             }
             HintResult.NoCandidate -> if (g.state.lastAiHanbang && !timedOut) {
-                offerConcede()
+                concede(Phrases.NO_WORD_LEFT)
             } else if (timedOut) {
                 g.declineHint(now())
                 finishRound(Phrases.TIME_UP)
@@ -772,10 +758,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 when (g.tick(now())) {
                     TickResult.OfferHint -> {
                         persist()
-                        ask(Ask.HINT, Phrases.OFFER_HINT)
+                        giveHint()
                     }
                     TickResult.TimeUp -> finishRound(Phrases.TIME_UP)
-                    TickResult.None -> if (stuckOnHanbang(g)) offerConcede()
+                    TickResult.None -> if (stuckOnHanbang(g)) concede(Phrases.NO_WORD_LEFT)
                 }
             }
         }
@@ -783,17 +769,17 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     /**
      * 주행 중에는 제한시간이 없어 한방 단어에 막히면 끝나지 않는다.
-     * AI 가 한방 단어를 말하고 30초가 지나도록 답이 없으면 한 번 물어본다.
+     * AI 가 한방 단어를 말하고 30초가 지나도록 답이 없으면 판을 끝낸다.
      */
     private fun stuckOnHanbang(g: WordGame): Boolean =
         g.state.lastAiHanbang && g.state.mode == PlayMode.DRIVING && !g.state.paused && !busy &&
-            _ui.value.ask == Ask.NONE && _ui.value.mic == Mic.LISTENING &&
-            concedeOfferedTurn != g.state.turn && now() - aiSpokeAt > 30_000
+            _ui.value.ask == Ask.NONE && _ui.value.mic == Mic.LISTENING && now() - aiSpokeAt > 30_000
 
-    private fun offerConcede() {
+    /** 묻지 않고 이번 판을 사용자 패로 끝낸다 */
+    private fun concede(line: String) {
         val g = game ?: return
-        concedeOfferedTurn = g.state.turn
-        ask(Ask.CONCEDE, Phrases.ASK_CONCEDE)
+        g.giveUp(now())
+        finishRound(line)
     }
 
     // ── 일시정지·차량 상태 ─────────────────────────────────
@@ -810,12 +796,12 @@ class GameController(app: Application) : AndroidViewModel(app) {
         persist()
     }
 
-    /** 음성 우선권을 되찾으면 자동으로 재개하지 않고 이어 할지 묻는다. */
+    /** 음성 우선권을 되찾아도 자동으로 재개하지 않고 '이어서'라는 말을 기다린다. */
     private fun offerResume() {
         val g = game ?: return
         if (!pausedByAudioFocus || g.isFinished) return
         pausedByAudioFocus = false
-        ask(Ask.RESUME, Phrases.ASK_RESUME)
+        ask(Ask.RESUME, Phrases.SAY_RESUME)
     }
 
     fun resume() {
@@ -833,12 +819,10 @@ class GameController(app: Application) : AndroidViewModel(app) {
         val g = game ?: return
         if (g.isFinished || state == VehicleState.PARKED) return
         val hadLimit = g.state.clock.hasLimit
-        val wasOfferingHint = _ui.value.ask == Ask.HINT
         g.changeMode(vehicle.currentMode())
         if (!hadLimit) return
         persist()
-        _ui.update { it.copy(notice = "주행 중에는 제한시간 없이 진행해요", ask = if (wasOfferingHint) Ask.NONE else it.ask) }
-        if (wasOfferingHint) repeatPrompt("주행 중이라 제한시간 없이 계속할게요.")
+        _ui.update { it.copy(notice = "주행 중에는 제한시간 없이 진행해요") }
     }
 
     // ── 종료 ───────────────────────────────────────────────
@@ -861,17 +845,13 @@ class GameController(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 판이 끝나면 다음 판을 묻는다: 이기면 "한 단계 어렵게 해 볼까요?"(가장 어려운 단계면 "한 판 더 할까요?"),
-     * 지면 "한 판 더 할까요?". 사용자가 "그만"으로 끝낸 판은 더 묻지 않고 처음 화면으로 간다.
+     * 판이 끝나면 다음에 무엇을 할지 듣는다(이겼고 더 어려운 단계가 있으면 그 단계도 알려 준다).
+     * 사용자가 "그만"으로 끝낸 판은 처음 화면으로 간다.
      */
     private fun offerNext(outcome: Outcome) {
         lastHeard = null
-        resultNudged = false
-        when {
-            outcome == Outcome.VOID -> goHome()
-            outcome == Outcome.WIN && suggestedNext() != null -> ask(Ask.NEXT_LEVEL, Phrases.askNextLevel(suggestedNext()!!))
-            else -> ask(Ask.PLAY_AGAIN, Phrases.PLAY_AGAIN)
-        }
+        if (outcome == Outcome.VOID) return goHome()
+        ask(Ask.NEXT, Phrases.nextGame(suggestedNext().takeIf { outcome == Outcome.WIN }))
     }
 
     /** 결과 기록과 포인트 지급. 같은 판은 기록·지급 모두 한 번만 반영된다(roundId 기준). */

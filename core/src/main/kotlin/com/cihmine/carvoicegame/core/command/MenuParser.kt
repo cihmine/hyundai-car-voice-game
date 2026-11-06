@@ -52,6 +52,12 @@ object MenuParser {
     private val EXIT = listOf("종료", "끝내", "앱꺼", "꺼줘", "나갈래", "나가자")
     private val RULES = listOf("규칙", "무슨게임", "뭐있어", "뭐가있어", "어떤게임있어", "게임뭐있어")
 
+    /** 게임 이름 없이 난이도만 말했을 때("어려운 단계로 해 보자") 그 난이도 */
+    fun difficultyIn(utterance: String): Difficulty? {
+        val text = Words.normalize(utterance)
+        return DIFFICULTIES.firstOrNull { (_, words) -> words.any { it in text } }?.first
+    }
+
     fun parse(utterance: String): MenuChoice {
         val text = Words.normalize(utterance)
         if (text.isEmpty()) return MenuChoice.Unknown

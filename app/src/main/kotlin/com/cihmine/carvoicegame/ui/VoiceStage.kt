@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -38,8 +37,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cihmine.carvoicegame.core.GameKind
 import com.cihmine.carvoicegame.core.Outcome
-import com.cihmine.carvoicegame.game.Ask
+import com.cihmine.carvoicegame.core.hangul.Hangul
 import com.cihmine.carvoicegame.game.GameController
 import com.cihmine.carvoicegame.game.GameUi
 import com.cihmine.carvoicegame.game.Mic
@@ -53,6 +53,7 @@ private val Black = Color(0xFF000000)
 private val AiText = Color(0xFFFFFFFF)
 private val UserText = Color(0xFF9A9AA2)
 private val Dim = Color(0xFF55555C)
+private val Soft = Color(0xFFB4B4BC) // 심사자가 처음 읽는 소개 문구는 어두운 글자로 두지 않는다
 
 /**
  * 실제 사용자 화면. 검은 화면 가운데 원이 있고, 위쪽에 자막이 나온다.
@@ -66,16 +67,19 @@ fun VoiceStage(ui: GameUi, c: GameController) {
     Box(Modifier.fillMaxSize().background(Black)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 64.dp, vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Captions(ui)
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // 가운데 원, 그 왼쪽에 지금 이어야 할 마지막 단어(안내 자막이 바뀌어도 늘 보이게)
+            Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) { LastWord(ui) }
                 Orb(ui.mic, aiLevel, userLevel)
+                Spacer(Modifier.weight(1f))
             }
             StatusLine(ui, c)
         }
         // 오른쪽 위: 터치 화면(게임·난이도 고르기, 시연 패널)으로
         Text(
             "터치 화면 ▸",
-            color = Dim,
-            fontSize = 16.sp,
+            color = Color.White,
+            fontSize = 20.sp,
             modifier = Modifier.align(Alignment.TopEnd).padding(20.dp).clickable { c.setStageMode(false) },
         )
     }
@@ -113,6 +117,27 @@ private fun Captions(ui: GameUi) {
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/**
+ * 원 왼쪽: 마지막 단어. 끝말잇기는 이어야 할 글자(두음 법칙 글자 포함), 초성 대결은 초성을 함께 보여 준다.
+ * 게임 중일 때만 보인다.
+ */
+@Composable
+private fun LastWord(ui: GameUi) {
+    val r = ui.round?.takeIf { ui.screen == Screen.PLAYING } ?: return
+    Column(Modifier.padding(end = 24.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (r.kind == GameKind.CHOSEONG) {
+            Text("초성", color = Dim, fontSize = 22.sp)
+            Text(r.choseong ?: "", color = AiText, fontSize = 64.sp, fontWeight = FontWeight.Bold)
+            return@Column
+        }
+        val word = r.lastAiWord ?: return@Column
+        Text("마지막 단어", color = Dim, fontSize = 22.sp)
+        Text(word, color = AiText, fontSize = 64.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        val starts = (listOf(word.last()) + (Hangul.startCharsAfter(word.last()) - word.last())).joinToString(" · ")
+        Text("$starts (으)로 시작", color = UserText, fontSize = 24.sp)
     }
 }
 
@@ -163,16 +188,14 @@ private fun Orb(mic: Mic, aiLevel: Float, userLevel: Float) {
     }
 }
 
-/** 아래쪽 작은 정보: 게임·난이도·남은 시간, 질문 중이면 네/아니요 버튼(음성이 안 될 때 대신) */
+/** 아래쪽 작은 정보: 게임·난이도·남은 시간 */
 @Composable
 private fun StatusLine(ui: GameUi, c: GameController) {
     val round = ui.round
     val info = when (ui.screen) {
-        Screen.HOME -> "끝말잇기 · 초성 대결"
+        Screen.HOME -> "말게임 — 주차·충전 중에 AI 와 말로 하는 끝말잇기·초성 대결"
         Screen.PLAYING -> round?.let { r ->
             listOfNotNull(
-                // 질문·안내가 나오면 자막에서 제 단어가 사라지므로 여기 늘 보여 준다
-                r.lastAiWord?.let { "제 단어 $it" },
                 "${r.kind.label} · ${r.difficulty.label}",
                 ui.remainingMs?.let { "남은 시간 ${(it + 999) / 1000}초" },
                 "힌트 ${r.hintsLeft}번",
@@ -189,21 +212,12 @@ private fun StatusLine(ui: GameUi, c: GameController) {
         Screen.LOCKER -> null
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (ui.ask != Ask.NONE) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Pill("네") { c.answer(true) }
-                Pill("아니요") { c.answer(false) }
-            }
+        if (info != null) Text(info, color = if (ui.screen == Screen.HOME) Soft else Dim, fontSize = 20.sp)
+        if (!ui.micGranted || !ui.sttAvailable) {
+            Text("음성 인식을 쓸 수 없어요 — 오른쪽 위 '터치 화면'을 써 주세요", color = Dim, fontSize = 16.sp)
+        } else if (ui.screen == Screen.HOME) {
+            Text("마이크가 없으면 오른쪽 위 '터치 화면'에서 글자로 해 볼 수 있어요", color = Soft, fontSize = 16.sp)
         }
-        if (info != null) Text(info, color = Dim, fontSize = 20.sp)
-        if (!ui.micGranted || !ui.sttAvailable) Text("음성 인식을 쓸 수 없어요 — 오른쪽 위 '터치 화면'을 써 주세요", color = Dim, fontSize = 16.sp)
         Spacer(Modifier.height(4.dp))
     }
-}
-
-@Composable
-private fun Pill(label: String, onClick: () -> Unit) {
-    Box(
-        Modifier.background(Color(0xFF1C1C20), RoundedCornerShape(28.dp)).clickable(onClick = onClick).padding(horizontal = 36.dp, vertical = 14.dp),
-    ) { Text(label, color = Color.White, fontSize = 22.sp) }
 }

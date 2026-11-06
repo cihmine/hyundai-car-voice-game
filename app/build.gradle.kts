@@ -21,6 +21,8 @@ android {
         // 단어 검색 중계 서버(server/). 비워 두면 인터넷 검색 없이 앱 안 사전만 쓴다.
         val dictProxy = providers.gradleProperty("carvoicegame.dictProxy").getOrElse("")
         buildConfigField("String", "DICT_PROXY_URL", "\"$dictProxy\"")
+        // 차량(arm64)과 에뮬레이터(x86_64)만. SDK 가 끌고 오는 mips 등의 네이티브 파일을 뺀다.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     signingConfigs {
@@ -43,7 +45,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
     }

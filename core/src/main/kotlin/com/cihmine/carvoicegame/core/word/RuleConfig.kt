@@ -9,11 +9,11 @@ import com.cihmine.carvoicegame.core.PlayMode
  */
 data class RuleConfig(
     /** 주차 모드 기본 답변 시간. AI 가 말하기를 끝낸 뒤부터 잰다. */
-    val parkedLimitMs: Long = 10_000,
+    val parkedLimitMs: Long = 15_000,
     /** 주차 모드 오답 후 남은 시간에 더하는 시간. 안내 음성 시간은 포함하지 않는다. */
     val wrongAnswerBonusMs: Long = 5_000,
     /** 힌트 설명이 끝난 뒤 새로 주는 시간. 기본 답변 시간과 따로 설정한다. */
-    val hintExtensionMs: Long = 10_000,
+    val hintExtensionMs: Long = 15_000,
     val easyHints: Int = 2,
     val normalHints: Int = 1,
     val hardHints: Int = 0,

@@ -47,6 +47,26 @@ object Hangul {
         return result
     }
 
+    /**
+     * 자음이나 모음 하나만 다른 말들(음성 오인식 구제용). 예: 구사 → 부사, 평소 → 병소.
+     * 두~네 글자 완성형 한글이 아니면 없다. 원래 말은 포함하지 않는다.
+     */
+    fun oneJamoVariants(word: String): Sequence<String> {
+        if (word.length !in 2..4 || !word.all(::isSyllable)) return emptySequence()
+        return sequence {
+            for (i in word.indices) {
+                val index = word[i].code - BASE
+                val cho = index / CHO_STRIDE
+                val jung = (index % CHO_STRIDE) / JONG_COUNT
+                val jong = index % JONG_COUNT
+                fun with(c: Char) = word.substring(0, i) + c + word.substring(i + 1)
+                for (x in CHOSEONG.indices) if (x != cho) yield(with(compose(x, jung, jong)))
+                for (x in 0 until JUNG_COUNT) if (x != jung) yield(with(compose(cho, x, jong)))
+                for (x in 0 until JONG_COUNT) if (x != jong) yield(with(compose(cho, jung, x)))
+            }
+        }
+    }
+
     private fun compose(cho: Int, jung: Int, jong: Int): Char =
         (BASE + cho * CHO_STRIDE + jung * JONG_COUNT + jong).toChar()
 }

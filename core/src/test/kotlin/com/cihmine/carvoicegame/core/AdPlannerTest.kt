@@ -57,7 +57,7 @@ class AdPlannerTest {
     ): WordGame = WordGame.restore(
         WordGameState(
             roundId = "r1", kind = GameKind.WORD_CHAIN, difficulty = Difficulty.EASY, mode = PlayMode.PARKED,
-            used = used, lastAiWord = lastAiWord, hintsLeft = 2, clock = RuleConfig.DEFAULT.clockFor(PlayMode.PARKED),
+            used = used, lastAiWord = lastAiWord, hintsLeft = 2, clock = TEN_SECOND_RULES.clockFor(PlayMode.PARKED),
             validUserWords = validUserWords, brand = brand,
         ),
         dictionary, Random(seed), planner = planner,
@@ -140,7 +140,7 @@ class AdPlannerTest {
         assertEquals("현관", aiWord(expired.submit(listOf("표현"), now = 0)))
 
         // 일반 모드는 브랜드 단어가 사전에 없다
-        val normal = game("세대", used = listOf("세대"), brand = null)
+        val normal = game("표현", used = listOf("표현"), brand = null)
         assertIs<TurnResult.Reconfirm>(normal.submit(listOf("현대"), now = 0))
     }
 

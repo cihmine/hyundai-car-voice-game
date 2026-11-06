@@ -25,7 +25,11 @@ data class WordEntry(
     val isFamiliar: Boolean get() = familiarity <= 1
 }
 
-class WordDictionary(entries: Iterable<WordEntry>) {
+/**
+ * 단어장. [acceptOnly] 는 사용자 답을 인정할 때만 쓰는 표제어 목록(정렬됨)으로, AI 는 말하지 않고 힌트에도 쓰지 않는다.
+ * 그래서 목록이 커져도 AI 실력과 난이도는 그대로이고, 서버 없이도 흔한 말이 거절되지 않는다.
+ */
+class WordDictionary(entries: Iterable<WordEntry>, private val acceptOnly: Lazy<List<String>> = lazyOf(emptyList())) {
     private val byWord: Map<String, WordEntry> = entries.associateBy { it.word }
     private val byFirstChar: Map<Char, List<WordEntry>> = byWord.values.groupBy { it.word.first() }
     private val byChoseong: Map<String, List<WordEntry>> = byWord.values
@@ -37,9 +41,12 @@ class WordDictionary(entries: Iterable<WordEntry>) {
 
     fun lookup(word: String): WordEntry? = byWord[word]
 
+    /** 사용자 답으로 인정할 수 있는 단어인지 */
+    fun accepts(word: String): Boolean = word in byWord || acceptOnly.value.binarySearch(word) >= 0
+
     /** [extra] 를 더한 사전. 같은 단어가 있으면 [extra] 쪽을 쓴다(브랜드 단어로 표시). */
     fun plus(extra: Collection<WordEntry>): WordDictionary =
-        if (extra.isEmpty()) this else WordDictionary(byWord.values + extra)
+        if (extra.isEmpty()) this else WordDictionary(byWord.values + extra, acceptOnly)
 
     fun startingWith(chars: Set<Char>): List<WordEntry> = chars.flatMap { byFirstChar[it].orEmpty() }
 
@@ -77,6 +84,12 @@ class WordDictionary(entries: Iterable<WordEntry>) {
         /** 우리말샘 단어 중 직접 고른 일상 단어. 직접 쓴 단어와 같은 0단계(core)로 다룬다. */
         const val EVERYDAY_FILE = "/data/everyday_opendict.txt"
 
+        /** 판정 전용 표제어(우리말샘, tools/fetch-opendict-accept.mjs). 정렬돼 있어야 한다. */
+        const val ACCEPT_FILE = "/data/words_accept.txt"
+
+        fun acceptWords(): List<String> = readResource(ACCEPT_FILE).lineSequence()
+            .filter { it.isNotEmpty() && !it.startsWith("#") }.toList()
+
         fun everydayWords(): Set<String> = readResource(EVERYDAY_FILE).lineSequence()
             .map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toSet()
 
@@ -87,6 +100,7 @@ class WordDictionary(entries: Iterable<WordEntry>) {
                     parseTsv(readResource(file), core = file != OPENDICT_FILE).entries
                         .map { if (!it.core && it.word in everyday) it.copy(core = true) else it }
                 },
+                lazy(::acceptWords),
             )
         }
     }
