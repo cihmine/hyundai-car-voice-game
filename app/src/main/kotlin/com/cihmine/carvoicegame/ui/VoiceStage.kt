@@ -205,13 +205,19 @@ private fun StatusLine(ui: GameUi, c: GameController) {
             val title = when (r.outcome) {
                 Outcome.WIN -> "이겼어요"
                 Outcome.LOSE -> "졌어요"
-                else -> "끝"
+                // 그만둔 판: 이어 간 단어 수를 먼저, 보상 규칙은 보조로
+                else -> "단어 ${r.validUserWords}개 이음  ·  승패 미집계"
             }
-            "$title  ·  ${if (ui.lastReward > 0) "+${ui.lastReward}P" else "보상 없음"}  ·  잔액 ${ui.save.ledger.balance}P"
+            "$title  ·  ${if (ui.lastReward > 0) "+${ui.lastReward}P" else "포인트 없음"}  ·  잔액 ${ui.save.ledger.balance}P"
         }
         Screen.LOCKER -> null
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // 멈춤·마이크 오류·주행 전환 같은 상태를 기본 화면에도 같은 자리에 크게 보인다(이유 없이 조용해지지 않게)
+        if (ui.screen == Screen.PLAYING) {
+            val state = ui.notice ?: if (round?.paused == true) "잠시 멈춤 — '이어서'라고 말하면 계속해요" else null
+            state?.let { Text(it, color = Color(0xFFFFD54F), fontSize = 24.sp, fontWeight = FontWeight.SemiBold) }
+        }
         if (info != null) Text(info, color = if (ui.screen == Screen.HOME) Soft else Dim, fontSize = 20.sp)
         if (!ui.micGranted || !ui.sttAvailable) {
             Text("음성 인식을 쓸 수 없어요 — 오른쪽 위 '터치 화면'을 써 주세요", color = Dim, fontSize = 16.sp)

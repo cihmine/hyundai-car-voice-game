@@ -71,7 +71,14 @@ object Phrases {
     const val NOT_UNDERSTOOD = "잘 못 알아들었어요. 단어 하나만 말씀해 주세요."
     const val NO_WORD_LEFT = "이을 단어가 없네요. 이번 판은 제가 이겼어요. 다음엔 그 글자를 조심하세요."
     const val CONCEDED = "좋아요, 이번 판은 제가 이겼어요. 다음엔 그 글자를 조심하세요."
-    const val VOIDED = "그만할게요. 이번 판은 무효로 하고 보상은 없어요."
+    /** 사용자가 그만둔 판. 벌처럼 들리지 않게 이어 간 단어 수를 먼저 말하고, 보상 규칙(무효·보상 없음)은 화면 보조 정보로 둔다. */
+    fun voided(userWords: Int) =
+        if (userWords > 0) "여기까지 할게요. 이번에 단어 ${userWords}개를 이었어요." else "여기까지 할게요."
+    const val HINTS_USED_UP = "힌트는 다 썼어요."
+    /** 직접 멈췄을 때. 터치 없이 말로 돌아올 수 있게 안내한다 */
+    const val PAUSED_SAY_RESUME = "멈췄어요. 이어서 하려면 '이어서'라고 말씀해 주세요."
+    /** 마이크·음성 인식 장치 오류가 이어질 때. 시간 초과로 지지 않게 판을 멈추고 저장한다 */
+    const val MIC_LOST = "마이크 연결이 끊겨 잠시 멈췄어요. 판은 저장했어요."
     const val TIME_UP = "시간이 다 됐어요. 이번 판은 제가 이겼어요."
     const val GAVE_UP = "알겠어요. 이번 판은 제가 이겼어요."
     const val SAY_RESUME = "이어서 하려면 '이어서'라고 말씀해 주세요."

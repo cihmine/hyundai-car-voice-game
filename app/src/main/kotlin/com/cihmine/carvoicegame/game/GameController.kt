@@ -369,7 +369,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
         if (!_ui.value.micGranted || !_ui.value.sttAvailable) return // 시연 패널 글자 입력으로 진행
         stt.listen(object : SpeechInput.Listener {
             override fun onSpeechStart() {
-                if (token == listenToken) game?.userSpeechStarted(now())
+                if (token != listenToken) return
+                micErrors = 0
+                game?.userSpeechStarted(now())
             }
 
             override fun onPartial(text: String) {
@@ -377,18 +379,51 @@ class GameController(app: Application) : AndroidViewModel(app) {
             }
 
             override fun onResult(candidates: List<String>) {
-                if (token == listenToken) onUtterance(candidates, turn)
+                if (token != listenToken) return
+                micErrors = 0
+                onUtterance(candidates, turn)
             }
 
             override fun onError(error: SpeechError) {
                 if (token != listenToken) return
-                // 말을 시작해 멈췄던 시계를 다시 흐르게 한다(이미 흐르는 중이면 그대로).
-                game?.speechFinished(now())
                 // 말이 없어서 끊긴 것이면 조용히 다시 듣는다. 시간 초과 판정은 엔진 시계가 한다.
-                if (error == SpeechError.NO_MATCH || error == SpeechError.TIMEOUT) listen()
-                else _ui.update { it.copy(mic = Mic.OFF, notice = "음성 인식 오류(${error.name}) — 글자 입력을 써 주세요") }
+                if (error == SpeechError.NO_MATCH || error == SpeechError.TIMEOUT) {
+                    // 말을 시작해 멈췄던 시계를 다시 흐르게 한다(이미 흐르는 중이면 그대로).
+                    game?.speechFinished(now())
+                    return listen()
+                }
+                micLost(error, token)
             }
         })
+    }
+
+    /** 이어진 음성 장치 오류 수. 말이 들리거나 결과가 오면 0 */
+    private var micErrors = 0
+
+    /**
+     * 마이크·음성 인식 장치 오류(단순 침묵과 다르다). 사용자 잘못이 아니므로 시간 초과 패배로 이어지지 않게 한다.
+     * 시계를 멈춘 채 한 번 짧게 다시 연결해 보고, 또 실패하면 판을 멈추고 저장한 뒤 화면·음성으로 알린다.
+     */
+    private fun micLost(error: SpeechError, token: Int) {
+        val g = game ?: return
+        g.speechStarted(now()) // 시계 멈춤
+        DebugLog.d(TAG) { "stt error $error (#${micErrors + 1})" }
+        if (++micErrors <= 1) {
+            _ui.update { it.copy(notice = "마이크 다시 연결 중…") }
+            viewModelScope.launch {
+                delay(1_000)
+                if (token != listenToken || game !== g || g.isFinished || g.state.paused) return@launch
+                _ui.update { it.copy(notice = null) }
+                g.speechFinished(now())
+                listen()
+            }
+            return
+        }
+        micErrors = 0
+        pause(byAudioFocus = false)
+        _ui.update { it.copy(notice = Phrases.MIC_LOST) }
+        // 마이크가 돌아오면 '이어서'로, 아니면 터치 화면의 '계속'으로 이어 간다
+        ask(Ask.RESUME, "${Phrases.MIC_LOST} ${Phrases.SAY_RESUME}")
     }
 
     /** 화면 버튼. 음성 명령과 같은 처리를 한다. */
@@ -526,7 +561,11 @@ class GameController(app: Application) : AndroidViewModel(app) {
         val g = game ?: return
         when (command) {
             VoiceCommand.QUIT -> voidRound()
-            VoiceCommand.PAUSE -> pause(byAudioFocus = false)
+            VoiceCommand.PAUSE -> {
+                pause(byAudioFocus = false)
+                // 직접 멈춘 경우: 말로 '이어서'만 하면 돌아오게 기다린다(예/아니요 확인은 없음)
+                if (game?.state?.paused == true) ask(Ask.RESUME, Phrases.PAUSED_SAY_RESUME)
+            }
             VoiceCommand.RESUME, VoiceCommand.YES, VoiceCommand.NO -> repeatPrompt(null)
             VoiceCommand.EASIER, VoiceCommand.HARDER -> changeDifficulty(command == VoiceCommand.HARDER)
             VoiceCommand.FASTER -> setRate(SpeechRate.faster(save.speechRatePercent))
@@ -537,8 +576,9 @@ class GameController(app: Application) : AndroidViewModel(app) {
                 g.giveUp(now())
                 finishRound(Phrases.GAVE_UP)
             }
-            // "모르겠어" — 힌트가 남았으면 힌트, 없으면 이번 판을 끝낸다
-            VoiceCommand.STUCK -> if (g.state.hintsLeft > 0) giveHint() else concede(Phrases.CONCEDED)
+            // "모르겠어" — 도움 요청으로만 본다. 힌트가 남았으면 힌트, 없으면 알려 주고 남은 시간 안에서 계속한다
+            // (혼잣말 "모르겠어"로 바로 지지 않게. 확실한 "내가 졌어·포기"는 GIVE_UP 이 바로 끝낸다)
+            VoiceCommand.STUCK -> if (g.state.hintsLeft > 0) giveHint() else repeatPrompt(Phrases.HINTS_USED_UP)
             VoiceCommand.REPEAT -> repeatPrompt(null)
             VoiceCommand.MISHEARD -> when (val c = g.correctLast(now())) {
                 is CorrectionResult.Undone -> {
@@ -792,7 +832,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
         stopVoice()
         g.pause(now())
         pausedByAudioFocus = byAudioFocus
-        _ui.update { it.copy(ask = Ask.NONE, notice = if (byAudioFocus) "다른 음성 안내가 있어 멈췄어요" else "일시정지") }
+        _ui.update { it.copy(ask = Ask.NONE, notice = if (byAudioFocus) "다른 음성 안내가 있어 멈췄어요" else "잠시 멈춤 — '이어서'라고 말하면 계속해요") }
         persist()
     }
 
@@ -829,7 +869,7 @@ class GameController(app: Application) : AndroidViewModel(app) {
 
     private fun voidRound() {
         game?.voidRound(now())
-        finishRound(Phrases.VOIDED)
+        finishRound(Phrases.voided(game?.state?.validUserWords ?: 0))
     }
 
     private fun finishRound(line: String) {
