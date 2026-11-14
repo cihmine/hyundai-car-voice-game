@@ -1,4 +1,4 @@
-# 말게임 (가칭)
+# 토크 미니게임
 
 운전 중 졸릴 때 화면을 보지 않고 AI와 **말로** 끝말잇기·초성 대결을 하는 Pleos Connect 앱입니다.
 
@@ -67,7 +67,7 @@ emulator -avd <Pleos AVD 이름> -no-snapshot-load -allow-host-audio
 
 release 서명 키는 저장소에 넣지 않는다. 기본 위치 `~/.android-keys/carvoicegame.properties`(storeFile·storePassword·keyAlias·keyPassword), 다른 곳이면 `-Pcarvoicegame.signing=경로`.
 
-테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive, 2560×1440). 일반 안드로이드 기기에서도 실행된다.
+테스트 환경: Pleos Connect v2.1.0 에뮬레이터(API 34, Automotive, 화면 2560×1440). 단위 테스트 120개 통과. 일반 안드로이드 기기에서도 실행된다.
 
 ### 음성
 
@@ -120,4 +120,8 @@ AI 단어 선택은 사용자 답을 확률 가중 평균으로 보는 2단계 �
 
 ## APK
 
-릴리스 APK는 팀명·앱 이름이 정해지면 `apk/` 폴더에 공식 파일명으로 둡니다. 서버 주소 없이 빌드합니다(`./gradlew :app:assembleRelease`).
+[`apk/최태현_토크미니게임_release.apk`](apk/최태현_토크미니게임_release.apk) — release 서명 APK(버전 0.1.0, 약 15MB, 서버 주소 없이 빌드·인터넷 없이 동작). Pleos Connect v2.1.0 에뮬레이터(2560×1440)에 설치해 실행을 확인했습니다.
+
+```
+adb install -r --user 10 apk/최태현_토크미니게임_release.apk   # 확인한 명령(에뮬레이터 차량 사용자 10)
+```

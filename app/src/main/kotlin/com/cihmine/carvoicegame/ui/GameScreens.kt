@@ -103,7 +103,7 @@ private fun HomeScreen(ui: GameUi, c: GameController) {
     val kind = ui.menuKind
     val difficulty = ui.menuDifficulty
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Text("말게임", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+        Text("토크 미니게임", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         Text("운전 중 졸릴 때 AI 와 말로 하는 끝말잇기·초성 대결", style = MaterialTheme.typography.titleMedium)
         Text(
             when (ui.mic) {
