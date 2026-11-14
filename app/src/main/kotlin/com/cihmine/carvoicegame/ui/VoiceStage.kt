@@ -193,7 +193,7 @@ private fun Orb(mic: Mic, aiLevel: Float, userLevel: Float) {
 private fun StatusLine(ui: GameUi, c: GameController) {
     val round = ui.round
     val info = when (ui.screen) {
-        Screen.HOME -> "말게임 — 주차·충전 중에 AI 와 말로 하는 끝말잇기·초성 대결"
+        Screen.HOME -> "말게임 — 운전 중 졸릴 때 AI 와 말로 하는 끝말잇기·초성 대결"
         Screen.PLAYING -> round?.let { r ->
             listOfNotNull(
                 "${r.kind.label} · ${r.difficulty.label}",
